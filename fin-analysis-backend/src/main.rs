@@ -17,8 +17,10 @@ async fn main() {
         .init();
 
     // Configuration from environment (with sensible defaults for local dev).
+    // Default to XRPL lending devnet (has AMM + XLS-66d lending enabled).
+    // Override with XRPL_ENDPOINT env var if needed.
     let xrpl_endpoint = std::env::var("XRPL_ENDPOINT")
-        .unwrap_or_else(|_| "https://s.altnet.rippletest.net:51234".to_string());
+        .unwrap_or_else(|_| "https://lend.devnet.rippletest.net:51234".to_string());
 
     let port: u16 = std::env::var("PORT")
         .ok()

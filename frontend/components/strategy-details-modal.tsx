@@ -9,7 +9,7 @@ import {
   DialogTitle 
 } from '@/components/ui/dialog'
 import { RiskIndicator } from '@/components/risk-indicator'
-import { Check, X, ArrowRight, TrendingUp, TrendingDown, Target, AlertTriangle } from 'lucide-react'
+import { Check, X, ArrowRight, TrendingUp, TrendingDown, Target, AlertTriangle, Landmark, HandCoins } from 'lucide-react'
 
 interface StrategyDetailsModalProps {
   strategy: Strategy
@@ -69,24 +69,55 @@ export function StrategyDetailsModal({ strategy, open, onOpenChange }: StrategyD
           <div className="space-y-3">
             <h3 className="font-semibold text-foreground">Trade Actions</h3>
             <div className="space-y-2">
+              {strategy.trade_actions.length === 0 && (
+                <p className="text-sm text-muted-foreground italic">No trades — hold current position.</p>
+              )}
               {strategy.trade_actions.map((action, index) => (
-                <div 
-                  key={index} 
-                  className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 border border-border"
+                <div
+                  key={index}
+                  className="flex flex-col gap-1.5 p-3 rounded-lg bg-muted/50 border border-border"
                 >
-                  <span className="px-2 py-1 text-xs font-medium rounded bg-primary/20 text-primary capitalize">
-                    {action.action}
-                  </span>
-                  <div className="flex items-center gap-2 flex-1">
-                    <span className="font-medium text-foreground">
-                      {action.amount} {action.asset_in}
+                  <div className="flex items-center gap-3">
+                    {action.action === 'lend' && <Landmark className="h-4 w-4 text-primary" />}
+                    {action.action === 'borrow' && <HandCoins className="h-4 w-4 text-risk-medium" />}
+                    <span className="px-2 py-1 text-xs font-medium rounded bg-primary/20 text-primary capitalize">
+                      {action.action}
                     </span>
-                    <ArrowRight className="h-4 w-4 text-muted-foreground" />
-                    <span className="font-medium text-foreground">{action.asset_out}</span>
+                    <div className="flex items-center gap-2 flex-1">
+                      <span className="font-medium text-foreground">
+                        {action.amount} {action.asset_in}
+                      </span>
+                      {action.action !== 'lend' && (
+                        <>
+                          <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                          <span className="font-medium text-foreground">
+                            {action.amount2 ? `${action.amount2} ` : ''}{action.asset_out}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    {action.estimated_slippage > 0 && (
+                      <span className="text-sm text-muted-foreground">
+                        Est. slippage: {action.estimated_slippage}%
+                      </span>
+                    )}
                   </div>
-                  <span className="text-sm text-muted-foreground">
-                    Est. slippage: {action.estimated_slippage}%
-                  </span>
+                  {(action.pool || action.deposit_mode || action.interest_rate != null) && (
+                    <div className="flex gap-2 ml-10">
+                      {action.pool && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">Pool: {action.pool}</span>
+                      )}
+                      {action.deposit_mode && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{action.deposit_mode.replace('_', '-')}</span>
+                      )}
+                      {action.interest_rate != null && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-risk-low/10 text-risk-low">{action.interest_rate}% APR</span>
+                      )}
+                      {action.term_days != null && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{action.term_days}d term</span>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

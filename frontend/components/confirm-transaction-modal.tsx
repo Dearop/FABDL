@@ -12,7 +12,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { RiskIndicator } from '@/components/risk-indicator'
-import { ArrowRight, AlertTriangle, Wallet } from 'lucide-react'
+import { ArrowRight, AlertTriangle, Wallet, Landmark, HandCoins } from 'lucide-react'
 
 interface ConfirmTransactionModalProps {
   strategy: Strategy
@@ -21,7 +21,7 @@ interface ConfirmTransactionModalProps {
 }
 
 export function ConfirmTransactionModal({ strategy, open, onOpenChange }: ConfirmTransactionModalProps) {
-  const { wallet, setStatus, setSelectedStrategy, setTxHash } = useWallet()
+  const { wallet, setStatus, setSelectedStrategy, setTxHash, setExecutionSummary } = useWallet()
 
   const handleConfirm = async () => {
     onOpenChange(false)
@@ -29,14 +29,15 @@ export function ConfirmTransactionModal({ strategy, open, onOpenChange }: Confir
     setStatus('executing')
 
     try {
-      // Call backend to execute strategy
+      // Call backend to execute strategy (simulated)
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
       const response = await fetch(`${apiUrl}/strategy/execute`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          strategy_id: strategy.id, 
-          wallet_id: wallet?.address 
+        body: JSON.stringify({
+          strategy_id: strategy.id,
+          wallet_id: wallet?.address,
+          strategy: strategy
         })
       })
 
@@ -46,12 +47,22 @@ export function ConfirmTransactionModal({ strategy, open, onOpenChange }: Confir
 
       const data = await response.json()
       setTxHash(data.tx_hash)
+      if (data.execution_summary) {
+        setExecutionSummary(data.execution_summary)
+      }
       setStatus('executed')
     } catch (err) {
       console.error('Error executing strategy:', err)
-      // Fallback to mock transaction
+      // Fallback: build summary client-side
       const mockTxHash = `${Math.random().toString(36).substring(2, 10).toUpperCase()}${Date.now().toString(36).toUpperCase()}`
       setTxHash(mockTxHash)
+      setExecutionSummary({
+        simulated: true,
+        summary_lines: strategy.trade_actions.length > 0
+          ? strategy.trade_actions.map(a => `${a.action} ${a.amount} ${a.asset_in}${a.action !== 'lend' ? ` → ${a.asset_out}` : ''}${a.pool ? ` (${a.pool})` : ''}`)
+          : ['No trades executed — position held unchanged.'],
+        net_cost: 'Est. network fee: 0.000012 XRP per transaction',
+      })
       setStatus('executed')
     }
   }
@@ -85,20 +96,44 @@ export function ConfirmTransactionModal({ strategy, open, onOpenChange }: Confir
             <h4 className="text-sm font-medium text-foreground">Transaction Details</h4>
             
             {strategy.trade_actions.map((action, index) => (
-              <div 
+              <div
                 key={index}
-                className="flex items-center justify-between p-3 rounded-lg bg-card border border-border"
+                className="flex flex-col gap-1 p-3 rounded-lg bg-card border border-border"
               >
                 <div className="flex items-center gap-2">
+                  {action.action === 'lend' && <Landmark className="h-3.5 w-3.5 text-primary" />}
+                  {action.action === 'borrow' && <HandCoins className="h-3.5 w-3.5 text-risk-medium" />}
                   <span className="text-xs font-medium px-2 py-0.5 rounded bg-primary/20 text-primary capitalize">
                     {action.action}
                   </span>
                   <span className="text-sm text-foreground">
                     {action.amount} {action.asset_in}
                   </span>
-                  <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                  <span className="text-sm text-foreground">{action.asset_out}</span>
+                  {action.action !== 'lend' && (
+                    <>
+                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                      <span className="text-sm text-foreground">
+                        {action.amount2 ? `${action.amount2} ` : ''}{action.asset_out}
+                      </span>
+                    </>
+                  )}
                 </div>
+                {(action.pool || action.deposit_mode || action.interest_rate != null) && (
+                  <div className="flex gap-2 ml-8">
+                    {action.pool && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">Pool: {action.pool}</span>
+                    )}
+                    {action.deposit_mode && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{action.deposit_mode.replace('_', '-')}</span>
+                    )}
+                    {action.interest_rate != null && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-risk-low/10 text-risk-low">{action.interest_rate}% APR</span>
+                    )}
+                    {action.term_days != null && (
+                      <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">{action.term_days}d term</span>
+                    )}
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -39,25 +39,78 @@ INTENT_ROUTER_PORT = 50051
 RUST_BACKEND_URL = os.environ.get("RUST_BACKEND_URL", "http://localhost:3001")
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
-CLAUDE_SYSTEM_PROMPT = (
-    "You are a quantitative trading strategist specializing in automated market makers "
-    "(AMMs) on the XRPL blockchain.\n\n"
-    "Your role:\n"
-    "1. Analyze portfolio risk metrics\n"
-    "2. Generate 2-3 concrete trading strategies\n"
-    "3. Explain trade-offs in simple terms\n"
-    "4. Provide numerical projections\n\n"
-    "Constraints:\n"
-    "- Be concise (max 50 words per strategy)\n"
-    "- Avoid jargon (explain 'delta' as 'directional exposure')\n"
-    "- Always include a 'Do Nothing' option\n"
-    "- Never recommend strategies with >1% slippage\n"
-    "- Cap risk_score at 8/10\n\n"
-    "Output: Structured JSON only. No prose before or after the JSON block.\n"
-    'Schema: {"strategies": [...], "recommendation": "option_id", "reasoning": "..."}'
-)
+CLAUDE_SYSTEM_PROMPT = """You are VEGA, a quantitative trading strategist specializing in XRPL's native AMM (constant-product, Uniswap v2-style) and the XLS-66d lending protocol.
+
+CONTEXT:
+- XRPL AMM uses x*y=k formula. Each pool holds exactly 2 assets. At most one can be XRP.
+- Deposit modes: "single_asset" (deposit one side, incurs fee) or "two_asset" (proportional, no fee).
+- Withdraw modes mirror deposits. Swaps go through the AMM pool.
+- XLS-66d lending: fixed-term loans from single-asset vaults. Lenders earn interest from utilization.
+- Borrowing enables delta-neutral LP: borrow risky asset, deposit into AMM, hedge impermanent loss.
+- Lending strategies should use VaR and Sharpe more heavily (direction risk is higher).
+
+YOUR ROLE:
+1. Analyze the portfolio risk metrics provided
+2. Generate EXACTLY 3 strategies: one conservative, one yield-focused, one "Do Nothing"
+3. Explain trade-offs in plain language (no jargon — say "directional exposure" not "delta")
+4. Provide numerical projections based on the risk data
+
+HARD CONSTRAINTS:
+- Cap risk_score at 8 (integer, 1-8 scale)
+- Never recommend estimated_slippage > 1.0 (percent)
+- Only use these assets: XRP, USD, BTC, ETH, USDC, USDT
+- Max 50 words per strategy description
+- "Do Nothing" must always be option_c with risk_score 1-4 and empty trade_actions
+- Generate exactly 3 strategies so validation always passes
+
+OUTPUT: Return ONLY this JSON. No prose, no markdown fences, no explanation before or after.
+{
+  "strategies": [
+    {
+      "id": "option_a",
+      "title": "string",
+      "description": "string (max 50 words)",
+      "risk_score": integer (1-8),
+      "projected_return_7d": {
+        "best_case": "$XXX",
+        "expected": "$XXX",
+        "worst_case": "-$XXX"
+      },
+      "trade_actions": [
+        {
+          "action": "swap" | "deposit" | "withdraw" | "lend" | "borrow",
+          "asset_in": "XRP" | "USD" | "BTC" | "ETH" | "USDC" | "USDT",
+          "asset_out": "XRP" | "USD" | "BTC" | "ETH" | "USDC" | "USDT",
+          "amount": number,
+          "amount2": number or null (for two-asset deposits only),
+          "estimated_slippage": number (0 to 1.0, percent),
+          "pool": "ASSET1/ASSET2" or null (e.g. "XRP/USD"),
+          "deposit_mode": "single_asset" | "two_asset" | null,
+          "interest_rate": number or null (annualized %, for lend/borrow only),
+          "term_days": integer or null (for lend/borrow only)
+        }
+      ],
+      "pros": ["string", "string"],
+      "cons": ["string", "string"]
+    }
+  ]
+}
+
+STRATEGY TAXONOMY:
+- option_a: Conservative — capital preservation, hedging, low risk (risk_score 1-3)
+- option_b: Yield-Focused — fee maximization, AMM deposits, lending, moderate-high risk (risk_score 4-8)
+- option_c: Do Nothing — hold current position, zero trade actions (risk_score 1-4)
+
+LENDING STRATEGY GUIDANCE:
+- "lend" action: supply asset to a vault, earn interest. asset_in = supplied asset, asset_out = same asset.
+- "borrow" action: borrow from vault. asset_in = collateral, asset_out = borrowed asset.
+- Delta-neutral LP: borrow risky asset + deposit into AMM = hedged IL. Higher risk_score (5-7).
+- Net hedging cost ratio = borrowing_cost / fee_APR. If > 1.0, the hedge costs more than it protects — flag in cons.
+"""
 
 ALLOWED_ASSETS = {"XRP", "USD", "BTC", "ETH", "USDC", "USDT"}
+ALLOWED_ACTIONS = {"swap", "deposit", "withdraw", "lend", "borrow"}
+ALLOWED_DEPOSIT_MODES = {"single_asset", "two_asset", None}
 
 # ==================== Request/Response Models ====================
 
@@ -67,10 +120,6 @@ class WalletConnectRequest(BaseModel):
 
 class QueryRequest(BaseModel):
     user_query: str
-    wallet_id: str
-
-class StrategySelectRequest(BaseModel):
-    strategy_id: str
     wallet_id: str
 
 class Parameter(BaseModel):
@@ -221,16 +270,34 @@ async def _call_claude(prompt_text: str) -> dict:
 
 
 def _validate_strategy(s: dict) -> bool:
-    """Enforce safety guardrails from PROMPTS.md."""
-    if not {"id", "title", "description", "risk_score"}.issubset(s.keys()):
+    """Enforce safety guardrails."""
+    required = {"id", "title", "description", "risk_score"}
+    if not required.issubset(s.keys()):
+        print(f"  [Validation] Missing required fields: {required - set(s.keys())}")
         return False
     if not isinstance(s.get("risk_score"), (int, float)) or s["risk_score"] > 8:
+        print(f"  [Validation] Invalid risk_score: {s.get('risk_score')}")
+        return False
+    if not isinstance(s.get("projected_return_7d"), dict):
+        print(f"  [Validation] Missing or invalid projected_return_7d")
+        return False
+    ret = s["projected_return_7d"]
+    if not all(k in ret for k in ("best_case", "expected", "worst_case")):
+        print(f"  [Validation] projected_return_7d missing fields")
+        return False
+    if not isinstance(s.get("pros"), list) or not isinstance(s.get("cons"), list):
+        print(f"  [Validation] Missing pros or cons arrays")
         return False
     for action in s.get("trade_actions", []):
         if action.get("estimated_slippage", 0) > 1.0:
+            print(f"  [Validation] Slippage too high: {action.get('estimated_slippage')}")
+            return False
+        if action.get("action") and action["action"] not in ALLOWED_ACTIONS:
+            print(f"  [Validation] Unknown action type: {action.get('action')}")
             return False
         for key in ("asset_in", "asset_out"):
             if action.get(key) and action[key] not in ALLOWED_ASSETS:
+                print(f"  [Validation] Unknown asset: {action.get(key)}")
                 return False
     return True
 
@@ -248,23 +315,37 @@ def _fallback_strategies() -> list:
     return [
         {
             "id": "option_a",
-            "title": "Do Nothing: Ride It Out",
-            "description": "Keep current position. Monitor fees vs. IL daily.",
-            "risk_score": 4,
+            "title": "Conservative: Exit to Stablecoin",
+            "description": "Withdraw LP tokens and hold XRP and USD separately. Eliminates impermanent loss risk entirely.",
+            "risk_score": 2,
             "projected_return_7d": {"best_case": "$0", "expected": "$0", "worst_case": "$0"},
-            "trade_actions": [],
-            "pros": ["Zero transaction cost", "Simple"],
-            "cons": ["Exposed to IL if XRP moves"],
+            "trade_actions": [
+                {"action": "withdraw", "asset_in": "XRP", "asset_out": "USD", "amount": 0, "estimated_slippage": 0.1, "pool": "XRP/USD", "deposit_mode": None, "amount2": None, "interest_rate": None, "term_days": None}
+            ],
+            "pros": ["Eliminates IL risk", "Capital preservation"],
+            "cons": ["Stops earning fees", "Re-entry cost if markets stabilise"],
         },
         {
             "id": "option_b",
-            "title": "Exit Position",
-            "description": "Withdraw all LP tokens and hold XRP and USD separately.",
-            "risk_score": 2,
+            "title": "Yield: Lend XRP in Vault",
+            "description": "Supply XRP to a lending vault. Earn fixed interest without AMM directional exposure.",
+            "risk_score": 3,
+            "projected_return_7d": {"best_case": "$15", "expected": "$8", "worst_case": "$0"},
+            "trade_actions": [
+                {"action": "lend", "asset_in": "XRP", "asset_out": "XRP", "amount": 50, "estimated_slippage": 0.0, "pool": None, "deposit_mode": None, "amount2": None, "interest_rate": 5.0, "term_days": 30}
+            ],
+            "pros": ["Predictable yield", "No impermanent loss"],
+            "cons": ["Lower returns than AMM fees", "Funds locked for term"],
+        },
+        {
+            "id": "option_c",
+            "title": "Do Nothing: Hold Current Position",
+            "description": "Keep current position unchanged. Monitor fees vs. impermanent loss daily.",
+            "risk_score": 3,
             "projected_return_7d": {"best_case": "$0", "expected": "$0", "worst_case": "$0"},
             "trade_actions": [],
-            "pros": ["Eliminates IL risk"],
-            "cons": ["Stops earning fees"],
+            "pros": ["Zero transaction cost", "No action needed"],
+            "cons": ["Exposed to IL if XRP moves", "No yield if not in AMM"],
         },
     ]
 
@@ -287,9 +368,21 @@ def _handle_execute_strategy_intent(intent: dict) -> list:
         },
         {
             "id": "option_b",
+            "title": "Yield: Lend Idle Capital",
+            "description": "Instead of executing, supply idle capital to a lending vault for fixed interest.",
+            "risk_score": 3,
+            "projected_return_7d": {"best_case": "$10", "expected": "$5", "worst_case": "$0"},
+            "trade_actions": [
+                {"action": "lend", "asset_in": "XRP", "asset_out": "XRP", "amount": 50, "estimated_slippage": 0.0, "pool": None, "deposit_mode": None, "amount2": None, "interest_rate": 5.0, "term_days": 30}
+            ],
+            "pros": ["Predictable yield", "No impermanent loss"],
+            "cons": ["Lower returns", "Funds locked for term"],
+        },
+        {
+            "id": "option_c",
             "title": "Do Nothing",
             "description": "Cancel and keep current position unchanged.",
-            "risk_score": 4,
+            "risk_score": 2,
             "projected_return_7d": {"best_case": "$0", "expected": "$0", "worst_case": "$0"},
             "trade_actions": [],
             "pros": ["No cost", "No risk"],
@@ -420,23 +513,97 @@ async def generate_strategies(request: QueryRequest):
 
 # ==================== Strategy Execution ====================
 
+class StrategyExecuteRequest(BaseModel):
+    strategy_id: str
+    wallet_id: str
+    strategy: Optional[dict] = None  # full strategy object for summary generation
+
+
+def _build_execution_summary(strategy: dict) -> dict:
+    """Build a human-readable simulated execution summary from a strategy."""
+    lines = []
+    trade_actions = strategy.get("trade_actions", [])
+
+    if not trade_actions:
+        lines.append("No trades executed — position held unchanged.")
+    else:
+        for action in trade_actions:
+            act = action.get("action", "unknown")
+            asset_in = action.get("asset_in", "?")
+            asset_out = action.get("asset_out", "?")
+            amount = action.get("amount", 0)
+            amount2 = action.get("amount2")
+            pool = action.get("pool")
+            deposit_mode = action.get("deposit_mode")
+            interest_rate = action.get("interest_rate")
+            term_days = action.get("term_days")
+
+            if act == "swap":
+                pool_str = f" via {pool} pool" if pool else ""
+                lines.append(f"Swapped {amount} {asset_in} → {asset_out}{pool_str}")
+            elif act == "deposit":
+                if deposit_mode == "two_asset" and amount2:
+                    lines.append(f"Two-asset deposit: {amount} {asset_in} + {amount2} {asset_out} into {pool or 'AMM'} pool")
+                else:
+                    lines.append(f"Single-asset deposit: {amount} {asset_in} into {pool or 'AMM'} pool")
+            elif act == "withdraw":
+                lines.append(f"Withdrew {amount} {asset_in} from {pool or 'AMM'} pool")
+            elif act == "lend":
+                rate_str = f" at {interest_rate}% APR" if interest_rate else ""
+                term_str = f" for {term_days} days" if term_days else ""
+                lines.append(f"Supplied {amount} {asset_in} to lending vault{rate_str}{term_str}")
+            elif act == "borrow":
+                rate_str = f" at {interest_rate}% APR" if interest_rate else ""
+                term_str = f" for {term_days} days" if term_days else ""
+                lines.append(f"Borrowed {amount} {asset_out} (collateral: {amount} {asset_in}){rate_str}{term_str}")
+
+    # Compute simple IL estimate for deposit actions
+    deposit_actions = [a for a in trade_actions if a.get("action") == "deposit"]
+    il_estimate = None
+    if deposit_actions:
+        il_estimate = "Estimated IL at ±10% price move: ~-0.5%"
+
+    fee_estimate = None
+    if deposit_actions:
+        fee_estimate = "Estimated Fee APR: 5-15% (depends on pool volume)"
+
+    lend_actions = [a for a in trade_actions if a.get("action") == "lend"]
+    if lend_actions:
+        rates = [a.get("interest_rate", 0) for a in lend_actions if a.get("interest_rate")]
+        if rates:
+            fee_estimate = f"Lending yield: {sum(rates)/len(rates):.1f}% APR"
+
+    return {
+        "simulated": True,
+        "summary_lines": lines,
+        "il_estimate": il_estimate,
+        "fee_estimate": fee_estimate,
+        "net_cost": "Est. network fee: 0.000012 XRP per transaction",
+    }
+
+
 @app.post("/strategy/execute")
-async def execute_strategy(request: StrategySelectRequest):
+async def execute_strategy(request: StrategyExecuteRequest):
     """
-    Execute a selected strategy.
-    In a real implementation, this would:
-    1. Build XRPL transaction
-    2. Request user signature via Otsu Wallet
-    3. Broadcast to XRPL
-    4. Return transaction hash
+    Execute a selected strategy (simulated).
+    Builds a human-readable summary of what trades would have been performed.
+    In production, this would build XRPL transactions and request wallet signatures.
     """
     try:
-        # Placeholder: return mock transaction hash
+        # Build execution summary from strategy if provided
+        execution_summary = _build_execution_summary(request.strategy or {})
+
+        # Simulated transaction hash
+        import hashlib, time
+        raw = f"{request.strategy_id}-{request.wallet_id}-{time.time()}"
+        tx_hash = hashlib.sha256(raw.encode()).hexdigest()[:64].upper()
+
         return {
-            "tx_hash": "0x1234567890abcdef",
-            "status": "pending",
+            "tx_hash": tx_hash,
+            "status": "confirmed",
             "wallet_id": request.wallet_id,
-            "strategy_id": request.strategy_id
+            "strategy_id": request.strategy_id,
+            "execution_summary": execution_summary,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
