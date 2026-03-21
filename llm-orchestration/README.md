@@ -189,6 +189,48 @@ print(f"Scope: {response.scope}")
 print(f"Parameters: {[(p.key, p.value) for p in response.parameters]}")
 ```
 
+## Important: Model is Stateless
+
+**Each query is completely independent with no memory between calls.**
+
+### What This Means
+
+- ✅ Query 1 → Model classifies it
+- ✅ Query 2 → Model sees **only Query 2**, not Query 1
+- ❌ No conversation history or context carryover
+- ❌ No session management or user state tracking
+
+### Each Query Must Be Self-Contained
+
+**Don't do this:**
+```
+Query 1: "I have 1000 USDC"
+Query 2: "What's my risk?"  
+→ Model doesn't know what "my risk" refers to
+```
+
+**Do this instead:**
+```
+Query 1: "I have 1000 USDC"
+Query 2: "What's the risk on my 1000 USDC position?"
+→ Model has all needed context in a single query
+```
+
+### Why Stateless?
+
+| Benefit | Trade-off |
+|---------|-----------|
+| No context pollution between queries | User must provide full context per query |
+| Zero latency overhead from state management | Can't reference prior queries |
+| Simple, auditable classification | Complex workflows need position IDs in query |
+| Consistent ~8s latency after first call | No cumulative state optimization |
+
+### Performance Impact
+
+- **Query 1:** ~25s (LLM model loads to GPU)
+- **Query 2-N:** ~8s each (warm GPU, **no context caching**)
+- **Latency never decreases** with more queries (no optimization memory)
+
 ## File Structure
 
 ```
