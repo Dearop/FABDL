@@ -86,6 +86,39 @@ class XRPLRPC:
             },
         )
 
+    def amm_info_by_account(self, amm_account: str, ledger_index: int) -> Dict[str, Any]:
+        return self.call(
+            "amm_info",
+            {
+                "amm_account": amm_account,
+                "ledger_index": ledger_index,
+            },
+        )
+
+    def ledger_amm_objects(self, ledger_index: int) -> List[Dict[str, Any]]:
+        amms: List[Dict[str, Any]] = []
+        marker: Optional[Any] = None
+        while True:
+            params: Dict[str, Any] = {
+                "ledger_index": ledger_index,
+                "type": "amm",
+                "binary": False,
+                "limit": 400,
+            }
+            if marker is not None:
+                params["marker"] = marker
+            result = self.call("ledger_data", params)
+            # rippled/clio can return under "state", "ledger_data", or "objects"
+            entries = result.get("state") or result.get("ledger_data") or result.get("objects") or []
+            for entry in entries:
+                obj = entry if isinstance(entry, dict) else {}
+                if obj.get("LedgerEntryType") == "AMM":
+                    amms.append(obj)
+            marker = result.get("marker")
+            if not marker:
+                break
+        return amms
+
     def account_lines(self, account: str, ledger_index: int) -> List[Dict[str, Any]]:
         lines: List[Dict[str, Any]] = []
         marker: Optional[Any] = None
@@ -123,6 +156,143 @@ def parse_asset(data: Dict[str, Any]) -> Asset:
     if kind == "issued":
         return Asset(kind="issued", currency=data["currency"], issuer=data["issuer"])
     raise ValueError(f"Unsupported asset kind: {kind}")
+
+
+def parse_asset_from_xrpl_obj(value: Dict[str, Any]) -> Asset:
+    # XRPL object form for XRP may be {"currency":"XRP"} or fully omitted in some contexts.
+    currency = value.get("currency", "XRP")
+    issuer = value.get("issuer", "")
+    if currency == "XRP" and not issuer:
+        return Asset(kind="xrp")
+    return Asset(kind="issued", currency=currency, issuer=issuer)
+
+
+def _parse_floatish(value: Any) -> float:
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    if isinstance(value, dict):
+        try:
+            return float(value.get("value", "0"))
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def discover_pools_from_ledger(rpc: XRPLRPC, snapshot_ledger: int, target_pool_count: int) -> List[Dict[str, Any]]:
+    raw_amms = rpc.ledger_amm_objects(snapshot_ledger)
+    discovered: List[Tuple[float, Dict[str, Any]]] = []
+
+    for obj in raw_amms:
+        asset_raw = obj.get("Asset") or obj.get("asset")
+        asset2_raw = obj.get("Asset2") or obj.get("asset2")
+        amm_account = obj.get("Account") or obj.get("account")
+        if not isinstance(asset_raw, dict) or not isinstance(asset2_raw, dict) or not amm_account:
+            continue
+
+        asset_0 = parse_asset_from_xrpl_obj(asset_raw)
+        asset_1 = parse_asset_from_xrpl_obj(asset2_raw)
+        # Heuristic ranking: prefer pools with larger LP token supply.
+        lp_score = _parse_floatish(obj.get("LPTokenBalance"))
+        reserve_score = _parse_floatish(obj.get("Amount")) + _parse_floatish(obj.get("Amount2"))
+        score = lp_score if lp_score > 0 else reserve_score
+
+        discovered.append(
+            (
+                score,
+                {
+                    "name": f"{asset_0.key()}-{asset_1.key()}",
+                    "asset_0": {"kind": asset_0.kind, "currency": asset_0.currency, "issuer": asset_0.issuer},
+                    "asset_1": {"kind": asset_1.kind, "currency": asset_1.currency, "issuer": asset_1.issuer},
+                    "amm_account": amm_account,
+                },
+            )
+        )
+
+    discovered.sort(key=lambda item: item[0], reverse=True)
+    top = [item[1] for item in discovered[:target_pool_count]]
+    return top
+
+
+def _extract_tx_json(raw_tx: Dict[str, Any]) -> Dict[str, Any]:
+    return raw_tx.get("tx_json", raw_tx)
+
+
+def discover_pools_from_recent_activity(
+    rpc: XRPLRPC, snapshot_ledger: int, target_pool_count: int, replay_window_secs: int
+) -> List[Dict[str, Any]]:
+    """
+    Fast discovery path:
+    - Scan only recent ledgers in the replay window
+    - Collect AMM accounts touched by AMM tx types
+    - Pull amm_info by amm_account
+    """
+    now_unix = int(time.time())
+    cutoff = now_unix - replay_window_secs
+    current = snapshot_ledger
+    amm_accounts: set = set()
+
+    while current > 0:
+        result = rpc.ledger_with_transactions(current)
+        ledger = result.get("ledger", {})
+        close_unix = xrpl_close_to_unix(int(ledger.get("close_time", 0)))
+        if close_unix < cutoff:
+            break
+
+        for raw in ledger.get("transactions", []):
+            tx = _extract_tx_json(raw)
+            tx_type = tx.get("TransactionType")
+            if tx_type not in AMM_TX_TYPES:
+                continue
+            # Most AMM txs include Account as the sender (not AMM account),
+            # so we rely on metadata AffectedNodes to find AMM ledger entries.
+            meta = raw.get("meta", {})
+            affected = meta.get("AffectedNodes", [])
+            for node in affected:
+                created = node.get("CreatedNode", {})
+                modified = node.get("ModifiedNode", {})
+                deleted = node.get("DeletedNode", {})
+                for obj in (created, modified, deleted):
+                    if obj.get("LedgerEntryType") != "AMM":
+                        continue
+                    fields = obj.get("FinalFields") or obj.get("NewFields") or {}
+                    acct = fields.get("Account")
+                    if acct:
+                        amm_accounts.add(acct)
+        current -= 1
+
+    discovered: List[Tuple[float, Dict[str, Any]]] = []
+    for amm_account in amm_accounts:
+        try:
+            info = rpc.amm_info_by_account(amm_account, snapshot_ledger)
+        except Exception:
+            continue
+        amm = info.get("amm", {})
+        if not amm:
+            continue
+        amount = amm.get("amount")
+        amount2 = amm.get("amount2")
+        asset_0 = parse_asset_from_xrpl_obj({"currency": "XRP"} if isinstance(amount, str) else amount)
+        asset_1 = parse_asset_from_xrpl_obj({"currency": "XRP"} if isinstance(amount2, str) else amount2)
+        lp_score = _parse_floatish(amm.get("lp_token"))
+        reserve_score = _parse_floatish(amount) + _parse_floatish(amount2)
+        score = lp_score if lp_score > 0 else reserve_score
+        discovered.append(
+            (
+                score,
+                {
+                    "name": f"{asset_0.key()}-{asset_1.key()}",
+                    "asset_0": {"kind": asset_0.kind, "currency": asset_0.currency, "issuer": asset_0.issuer},
+                    "asset_1": {"kind": asset_1.kind, "currency": asset_1.currency, "issuer": asset_1.issuer},
+                    "amm_account": amm_account,
+                },
+            )
+        )
+
+    discovered.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in discovered[:target_pool_count]]
 
 
 def amount_to_asset_key(value: Any) -> Optional[str]:
@@ -172,18 +342,31 @@ def run_snapshot(config_path: Path, out_path: Path) -> None:
     target_pool_count = int(cfg.get("target_pool_count", 25))
     strict = bool(cfg.get("strict_pool_count", True))
 
-    configured_pools = cfg.get("pools", [])
+    snapshot_ledger = rpc.latest_validated_ledger()
+    mode = str(cfg.get("pool_selection_mode", "configured")).lower()
+    if mode == "discover":
+        configured_pools = discover_pools_from_ledger(rpc, snapshot_ledger, target_pool_count)
+    elif mode == "recent_activity":
+        configured_pools = discover_pools_from_recent_activity(
+            rpc,
+            snapshot_ledger,
+            target_pool_count,
+            int(cfg.get("replay_window_secs", 3600)),
+        )
+    else:
+        configured_pools = cfg.get("pools", [])
+        if len(configured_pools) == 0:
+            raise RuntimeError("No pools configured. Add entries under 'pools' in config.")
+
     if strict and len(configured_pools) != target_pool_count:
         raise RuntimeError(
-            f"Configured pools ({len(configured_pools)}) must equal target_pool_count ({target_pool_count})"
+            f"Selected pools ({len(configured_pools)}) must equal target_pool_count ({target_pool_count})"
         )
-    if len(configured_pools) == 0:
-        raise RuntimeError("No pools configured. Add entries under 'pools' in config.")
 
-    snapshot_ledger = rpc.latest_validated_ledger()
     snapshot: Dict[str, Any] = {
         "generated_at_unix": int(time.time()),
         "snapshot_ledger_index": snapshot_ledger,
+        "pool_selection_mode": mode,
         "target_pool_count": target_pool_count,
         "top_lp_holders_per_pool": top_n,
         "pools": [],
@@ -192,7 +375,11 @@ def run_snapshot(config_path: Path, out_path: Path) -> None:
     for p in configured_pools:
         asset_0 = parse_asset(p["asset_0"])
         asset_1 = parse_asset(p["asset_1"])
-        amm_result = rpc.amm_info(asset_0, asset_1, snapshot_ledger)
+        amm_account_hint = p.get("amm_account")
+        if amm_account_hint:
+            amm_result = rpc.amm_info_by_account(amm_account_hint, snapshot_ledger)
+        else:
+            amm_result = rpc.amm_info(asset_0, asset_1, snapshot_ledger)
         amm = amm_result.get("amm", {})
         if not amm:
             raise RuntimeError(f"amm_info returned no AMM object for pool {p.get('name', '<unnamed>')}")

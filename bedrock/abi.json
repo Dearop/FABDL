@@ -1,0 +1,278 @@
+{
+  "contract_name": "uniswap-v3-xrpl",
+  "functions": [
+    {
+      "name": "initialize_pool",
+      "parameters": [
+        {
+          "name": "sqrt_price_q64_64",
+          "type": "UINT128",
+          "flag": 0,
+          "description": "Initial sqrt price in Q64.64"
+        },
+        {
+          "name": "fee_bps",
+          "type": "UINT16",
+          "flag": 0,
+          "description": "LP fee in basis points (e.g. 30 = 0.3%)"
+        },
+        {
+          "name": "protocol_fee_share_bps",
+          "type": "UINT16",
+          "flag": 0,
+          "description": "Protocol's share of fee in bps"
+        },
+        {
+          "name": "timestamp",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Current block timestamp (seconds)"
+        },
+        {
+          "name": "hook_id",
+          "type": "UINT8",
+          "flag": 0,
+          "description": "Hook to attach (0=None, 1=ConservativeHedge, 2=YieldRebalance)"
+        }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "mint",
+      "parameters": [
+        {
+          "name": "lower_tick",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Lower tick boundary (two's-complement; pass e.g. 0xFFFFFC18 for -1000)"
+        },
+        {
+          "name": "upper_tick",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Upper tick boundary (two's-complement)"
+        },
+        {
+          "name": "liquidity_delta",
+          "type": "UINT128",
+          "flag": 0,
+          "description": "Positive liquidity amount to add"
+        }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success"
+      }
+    },
+    {
+      "name": "burn",
+      "parameters": [
+        {
+          "name": "lower_tick",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Lower tick boundary (two's-complement; pass e.g. 0xFFFFFC18 for -1000)"
+        },
+        {
+          "name": "upper_tick",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Upper tick boundary (two's-complement)"
+        },
+        {
+          "name": "liquidity_delta",
+          "type": "UINT128",
+          "flag": 0,
+          "description": "Positive liquidity amount to remove"
+        }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success"
+      }
+    },
+    {
+      "name": "collect",
+      "parameters": [
+        {
+          "name": "lower_tick",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Lower tick boundary (two's-complement; pass e.g. 0xFFFFFC18 for -1000)"
+        },
+        {
+          "name": "upper_tick",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Upper tick boundary (two's-complement)"
+        },
+        {
+          "name": "max_amount_0",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Max token0 to collect"
+        },
+        {
+          "name": "max_amount_1",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Max token1 to collect"
+        }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success"
+      }
+    },
+    {
+      "name": "swap_exact_in",
+      "parameters": [
+        {
+          "name": "amount_in",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Exact input amount"
+        },
+        {
+          "name": "min_amount_out",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Minimum acceptable output (slippage guard)"
+        },
+        {
+          "name": "zero_for_one",
+          "type": "UINT8",
+          "flag": 0,
+          "description": "1 = token0→token1 (price down), 0 = reverse"
+        },
+        {
+          "name": "sqrt_price_limit_q64_64",
+          "type": "UINT128",
+          "flag": 0,
+          "description": "Hard price boundary"
+        },
+        {
+          "name": "timestamp",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Current block timestamp (seconds)"
+        }
+      ],
+      "returns": {
+        "type": "UINT64",
+        "description": "Amount out (0 on failure)"
+      }
+    },
+    {
+      "name": "observe",
+      "parameters": [
+        {
+          "name": "seconds_agos_packed",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Up to 4 × u16 seconds-ago values packed LE"
+        },
+        {
+          "name": "timestamp",
+          "type": "UINT32",
+          "flag": 0,
+          "description": "Current block timestamp"
+        }
+      ],
+      "returns": {
+        "type": "UINT64",
+        "description": "Packed (tick_cumulative_0: i32 \u003c\u003c 32 | tick_cumulative_1: i32)"
+      }
+    },
+    {
+      "name": "increase_observation_cardinality",
+      "parameters": [
+        {
+          "name": "next",
+          "type": "UINT16",
+          "flag": 0,
+          "description": "New target cardinality (number of observations to keep)"
+        }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success"
+      }
+    },
+    {
+      "name": "collect_protocol",
+      "parameters": [
+        {
+          "name": "max_amount_0",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Max token0 protocol fees to collect"
+        },
+        {
+          "name": "max_amount_1",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Max token1 protocol fees to collect"
+        }
+      ],
+      "returns": {
+        "type": "UINT64",
+        "description": "Packed (collected_0: u32 \u003c\u003c 32 | collected_1: u32) or 0 on error"
+      }
+    },
+    {
+      "name": "donate",
+      "parameters": [
+        {
+          "name": "amount0",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Token0 amount to distribute to in-range LPs"
+        },
+        {
+          "name": "amount1",
+          "type": "UINT64",
+          "flag": 0,
+          "description": "Token1 amount to distribute to in-range LPs"
+        }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "set_protocol_fee",
+      "parameters": [
+        {
+          "name": "protocol_fee_share_bps",
+          "type": "UINT16",
+          "flag": 0,
+          "description": "Protocol fee share (max 2500 = 25%)"
+        }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success"
+      }
+    },
+    {
+      "name": "set_pause",
+      "parameters": [
+        {
+          "name": "paused",
+          "type": "UINT8",
+          "flag": 0,
+          "description": "1 = pause, 0 = unpause"
+        }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success"
+      }
+    }
+  ]
+}

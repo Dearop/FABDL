@@ -1,3 +1,7 @@
+> **DEPRECATED** — This file is the original pre-implementation design sketch.
+> It describes intended architecture before any code existed and is no longer accurate.
+> The authoritative reference is [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md).
+
 \# Bedrock Smart Contract Design
 
 

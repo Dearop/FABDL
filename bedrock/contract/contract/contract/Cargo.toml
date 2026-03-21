@@ -1,0 +1,19 @@
+[package]
+name = "uniswap-v3-xrpl-contract"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Local stubs used for native/test builds.
+# `bedrock build` replaces these with the real xrpl-commons crates at WASM compile time.
+xrpl-wasm-macros = { path = "../xrpl-wasm-macros-stub" }
+xrpl-wasm-std    = { path = "../xrpl-wasm-std-stub" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"
