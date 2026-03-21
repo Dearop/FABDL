@@ -25,6 +25,11 @@ llm-orchestration/env/
 llm-orchestration/.env
 llm-orchestration/.pytest_cache/
 
+# Rust (Bedrock)
+bedrock/target/
+Cargo.lock
+**/*.rs.bk
+
 # IDE / Editor
 .vscode/settings.json
 .idea/

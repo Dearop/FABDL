@@ -31,23 +31,19 @@ class IntentRouterServicer(intent_router_pb2_grpc.IntentRouterServicer):
         self.use_ollama = use_ollama
         self.llm_available = self._check_llm_available()
         
-        self.prompt_template = """Extract and respond ONLY with valid JSON. No other text.
+        self.prompt_template = """TASK: Classify the user query into a JSON format. RESPOND ONLY WITH JSON, NOTHING ELSE.
 
-Categories:
-- action: analyze_risk | execute_strategy | check_position | get_price
-- scope: portfolio | specific_asset | specific_pool
-- parameters: {{}} object
+USER QUERY: {user_query}
 
-EXAMPLES:
-"Analyze my portfolio risk" → {{"action":"analyze_risk","scope":"portfolio","parameters":{{}}}}
-"XRP/USD position worth?" → {{"action":"check_position","scope":"specific_pool","parameters":{{"pool":"XRP/USD"}}}}
-"Execute conservative hedge" → {{"action":"execute_strategy","scope":"portfolio","parameters":{{"strategy":"conservative"}}}}
-"IL amount?" → {{"action":"analyze_risk","scope":"portfolio","parameters":{{"focus":"impermanent_loss"}}}}
-"Bitcoin price?" → {{"action":"get_price","scope":"specific_asset","parameters":{{"asset":"Bitcoin"}}}}
+RETURN ONLY THIS JSON FORMAT (no explanation, no extra text):
+{{"action": "analyze_risk|execute_strategy|check_position|get_price", "scope": "portfolio|specific_asset|specific_pool", "confidence": 0.0-1.0, "parameters": {{}}}}
 
-User: {user_query}
+Examples:
+- "analyze my portfolio" → {{"action":"analyze_risk","scope":"portfolio","confidence":0.95,"parameters":{{}}}}
+- "XRP price" → {{"action":"get_price","scope":"specific_asset","confidence":0.9,"parameters":{{"asset":"XRP"}}}}
+- "hedge strategy" → {{"action":"execute_strategy","scope":"portfolio","confidence":0.85,"parameters":{{"strategy":"conservative"}}}}
 
-**Output Format**: OUTPUT A JSON STRING:"""
+REMEMBER: RESPOND ONLY WITH JSON. NO WORDS BEFORE OR AFTER."""
 
     def _check_llm_available(self) -> bool:
         """Check if local LLM is available"""
