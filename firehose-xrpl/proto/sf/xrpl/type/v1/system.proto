@@ -1,0 +1,62 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+import "sf/xrpl/type/v1/amount.proto";
+
+// EnableAmendment - System transaction to enable/modify amendments
+// Reference: https://xrpl.org/enableamendment.html
+message EnableAmendment {
+  // Ledger sequence when this applies
+  uint32 ledger_sequence = 1;
+
+  // Amendment hash (64 hex chars)
+  string amendment = 2;
+}
+
+// SetFee - System transaction to update network fees
+// Reference: https://xrpl.org/setfee.html
+message SetFee {
+  // (Optional) Ledger sequence when this applies
+  uint32 ledger_sequence = 1;
+
+  // Old format fields
+  uint64 base_fee = 2;
+  uint32 reference_fee_units = 3;
+  uint32 reserve_base = 4;
+  uint32 reserve_increment = 5;
+
+  // New format fields (drops)
+  Amount base_fee_drops = 6;
+  Amount reserve_base_drops = 7;
+  Amount reserve_increment_drops = 8;
+
+  // Smart contract related
+  uint64 extension_compute_limit = 9;
+  uint64 extension_size_limit = 10;
+  uint64 gas_price = 11;
+}
+
+// UNLModify - System transaction to modify the Unique Node List
+// Reference: https://xrpl.org/unlmodify.html
+message UNLModify {
+  // Whether this disables a validator
+  bool unl_modify_disabling = 1;
+
+  // Ledger sequence when this applies
+  uint32 ledger_sequence = 2;
+
+  // Validator public key being modified (hex)
+  string unl_modify_validator = 3;
+}
+
+// LedgerStateFix - System transaction to fix ledger state issues
+// Reference: https://xrpl.org/ledgerstatefix.html
+message LedgerStateFix {
+  // Type of fix to apply
+  uint32 ledger_fix_type = 1;
+
+  // (Optional) Owner account affected
+  string owner = 2;
+}

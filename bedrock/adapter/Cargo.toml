@@ -1,0 +1,9 @@
+[package]
+name = "uniswap-v3-xrpl-adapter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+uniswap-v3-xrpl-contract = { path = "../contract" }
+
+[dev-dependencies]

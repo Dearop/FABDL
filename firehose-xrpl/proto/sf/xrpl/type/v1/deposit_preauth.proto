@@ -1,0 +1,25 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+// DepositPreauth - Pre-authorizes an account to deliver payments
+// Reference: https://xrpl.org/depositpreauth.html
+message DepositPreauth {
+  // (Optional) Account to pre-authorize
+  string authorize = 1;
+
+  // (Optional) Account to remove pre-authorization from
+  string unauthorize = 2;
+
+  // (Optional) Credentials to authorize
+  repeated AuthorizeCredential authorize_credentials = 3;
+
+  // (Optional) Credentials to unauthorize
+  repeated AuthorizeCredential unauthorize_credentials = 4;
+}
+
+message AuthorizeCredential {
+  string issuer = 1;
+  string credential_type = 2;
+}

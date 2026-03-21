@@ -1,0 +1,26 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+// PermissionedDomainSet - Creates or modifies a permissioned domain
+// Reference: https://xrpl.org/permissioneddomainset.html
+message PermissionedDomainSet {
+  // (Optional) Domain ID to modify (omit to create new)
+  string domain_id = 1;
+
+  // Accepted credential types
+  repeated AcceptedCredential accepted_credentials = 2;
+}
+
+message AcceptedCredential {
+  string issuer = 1;
+  string credential_type = 2;
+}
+
+// PermissionedDomainDelete - Deletes a permissioned domain
+// Reference: https://xrpl.org/permissioneddomaindelete.html
+message PermissionedDomainDelete {
+  // Domain ID to delete
+  string domain_id = 1;
+}

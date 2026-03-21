@@ -1,0 +1,45 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+import "sf/xrpl/type/v1/amount.proto";
+
+// CheckCreate - Creates a Check object
+// Reference: https://xrpl.org/checkcreate.html
+message CheckCreate {
+  // Recipient of the check
+  string destination = 1;
+
+  // Maximum amount the check can debit
+  Amount send_max = 2;
+
+  // (Optional) Expiration time
+  uint32 expiration = 3;
+
+  // (Optional) Destination tag
+  uint32 destination_tag = 4;
+
+  // (Optional) Invoice ID for reference
+  string invoice_id = 5;
+}
+
+// CheckCash - Cashes a Check object
+// Reference: https://xrpl.org/checkcash.html
+message CheckCash {
+  // ID of the check to cash (64 hex chars)
+  string check_id = 1;
+
+  // (Optional) Exact amount to receive
+  Amount amount = 2;
+
+  // (Optional) Minimum amount willing to receive
+  Amount deliver_min = 3;
+}
+
+// CheckCancel - Cancels a Check object
+// Reference: https://xrpl.org/checkcancel.html
+message CheckCancel {
+  // ID of the check to cancel (64 hex chars)
+  string check_id = 1;
+}

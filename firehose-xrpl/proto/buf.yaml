@@ -1,0 +1,7 @@
+version: v1
+name: buf.build/xrpl-commons/firehose-xrpl
+deps:
+  - buf.build/protocolbuffers/wellknowntypes
+breaking:
+  use:
+    - FILE

@@ -1,0 +1,22 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+// DelegateSet - Delegates permissions to another account
+// Reference: https://xrpl.org/delegateset.html
+message DelegateSet {
+  // Account to delegate permissions to
+  string authorize = 1;
+
+  // List of permissions to delegate
+  repeated Permission permissions = 2;
+}
+
+message Permission {
+  // Permission type
+  uint32 permission_type = 1;
+
+  // (Optional) Permission value
+  string permission_value = 2;
+}

@@ -1,0 +1,63 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+// Amount can be XRP (drops), issued currency/token, or MPT
+// The format depends on which fields are populated:
+// - XRP: Only value field (drops as string)
+// - Token: value, currency, and issuer fields
+// - MPT: value and mpt_issuance_id fields
+message Amount {
+  // Value of the amount
+  // For XRP: drops as string (e.g., "13100000" for 13.1 XRP)
+  // For token: decimal value as string, may use scientific notation (e.g., "153.75" or "1.23e11")
+  // For MPT: positive integer as string (0x0 to 0x7FFFFFFFFFFFFFFF)
+  string value = 1;
+
+  // Currency code for tokens (3-char or 40-hex)
+  // Empty for XRP and MPTs
+  // Must not be "XRP" for tokens
+  string currency = 2;
+
+  // Issuer address for tokens (empty for XRP and MPTs)
+  // The account that issues the token, or in special cases the holder
+  string issuer = 3;
+
+  // MPT issuance ID (40-char hex string)
+  // Only used for MPT amounts
+  // Empty for XRP and tokens
+  string mpt_issuance_id = 4;
+}
+
+// Currency asset identifier (for AMM, specifying without amounts, etc.)
+// Can represent XRP, tokens, or MPTs:
+// - XRP: Only currency field set to "XRP"
+// - Token: currency and issuer fields (no issuer for XRP)
+// - MPT: Only mpt_issuance_id field
+message Asset {
+  // Currency code (e.g., "USD", "XRP")
+  // Empty for MPTs
+  string currency = 1;
+
+  // Issuer address for tokens
+  // Empty for XRP and MPTs
+  string issuer = 2;
+
+  // MPT issuance ID (40-char hex string)
+  // Only used for MPT assets
+  // Empty for XRP and tokens
+  string mpt_issuance_id = 3;
+}
+
+// Path element for cross-currency payments
+message PathElement {
+  string account = 1;
+  string currency = 2;
+  string issuer = 3;
+}
+
+// A full path is a sequence of path elements
+message Path {
+  repeated PathElement elements = 1;
+}

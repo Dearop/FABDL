@@ -1,0 +1,17 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+// Signer in a multi-signature
+// Used in both transaction signers field and batch signers
+message Signer {
+  // Address associated with this signature, as it appears in the signer list
+  string account = 1;
+
+  // Signature for this transaction, verifiable using the signing_pub_key
+  string txn_signature = 2;
+
+  // Public key used to create this signature
+  string signing_pub_key = 3;
+}

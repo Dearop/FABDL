@@ -1,0 +1,21 @@
+firecore \
+    start \
+    substreams-tier1 \
+    --config-file= \
+    --log-format=stackdriver \
+    --log-to-file=false \
+    --advertise-chain-name=xrpl \
+    --advertise-block-id-encoding=hex \
+    --common-auto-max-procs \
+    --common-auto-mem-limit-percent=90 \
+    --common-system-shutdown-signal-delay=30s \
+    --common-merged-blocks-store-url=data/storage/merged-blocks \
+    --common-first-streamable-block=80000000 \
+    --common-one-block-store-url=data/oneblock \
+    --common-forked-blocks-store-url=data/storage/forked-blocks \
+    --substreams-tier1-grpc-listen-addr=:9000 \
+    --substreams-tier1-subrequests-insecure=true \
+    --substreams-tier1-subrequests-plaintext=false \
+    --substreams-tier1-max-subrequests=10 \
+    --substreams-state-bundle-size=100 \
+    --substreams-state-store-url=data/substreams-tier2/states
