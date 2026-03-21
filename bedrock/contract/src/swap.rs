@@ -7,7 +7,7 @@
 ///   4. Else → consume to boundary, cross the tick (flip outside accumulators,
 ///      apply liquidity_net), continue loop.
 
-use crate::math::{compute_swap_step, tick_at_sqrt_price, Q64};
+use crate::math::{compute_swap_step, tick_at_sqrt_price};
 use crate::tick::TickMap;
 use crate::tick_bitmap::TickBitmap;
 use crate::types::ContractError;
