@@ -26,6 +26,7 @@ macro_rules! wasm_trace {
 // ---------------------------------------------------------------------------
 
 pub mod codec;
+pub mod hooks;
 pub mod math;
 pub mod oracle;
 pub mod position;
@@ -34,6 +35,7 @@ pub mod tick;
 pub mod tick_bitmap;
 pub mod types;
 
+use hooks::{HookContext, HookId, SwapOutcome};
 use math::{amount0_delta, amount1_delta, sqrt_price_at_tick};
 pub use math::Q64;
 use oracle::OracleBuffer;
@@ -69,6 +71,8 @@ pub(crate) struct ContractConfig {
     pub paused: bool,
     pub max_slippage_bps: u16,
     pub tick_spacing: i32,
+    /// Hook attached to this pool (stored as 1 byte via codec).
+    pub hook_id: HookId,
 }
 
 pub(crate) struct ContractState {
@@ -102,6 +106,7 @@ impl ContractState {
                 paused: false,
                 max_slippage_bps: 100, // 1% hard cap
                 tick_spacing: 10,
+                hook_id: HookId::None,
             },
             oracle: OracleBuffer::new(),
             ticks: TickMap::new(),
@@ -259,6 +264,7 @@ fn require_initialized() -> Result<(), ContractError> {
 /// @param fee_bps UINT16 - LP fee in basis points (e.g. 30 = 0.3%)
 /// @param protocol_fee_share_bps UINT16 - Protocol's share of fee in bps
 /// @param timestamp UINT32 - Current block timestamp (seconds)
+/// @param hook_id UINT8 - Hook to attach (0=None, 1=ConservativeHedge, 2=YieldRebalance)
 /// @return UINT32 - 0 on success, error code otherwise
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn initialize_pool(
@@ -267,6 +273,7 @@ pub fn initialize_pool(
     fee_bps: u16,
     protocol_fee_share_bps: u16,
     timestamp: u32,
+    hook_id: u8,
 ) -> u32 {
     with_storage!({
         wasm_trace!("initialize_pool");
@@ -282,6 +289,7 @@ pub fn initialize_pool(
             s.pool.protocol_fee_share_bps = protocol_fee_share_bps.min(2_500);
             s.pool.last_block_timestamp = timestamp;
             s.pool.initialized = true;
+            s.config.hook_id = HookId::from_u8(hook_id);
             s.oracle.initialize(timestamp);
         });
         0
@@ -322,7 +330,17 @@ fn mint_inner(
         return Err(ContractError::InvalidTickRange);
     }
 
-    let tick_spacing = with_state(|s| s.config.tick_spacing);
+    let (tick_spacing, hook_id) = with_state(|s| (s.config.tick_spacing, s.config.hook_id));
+    let ctx = with_state(|s| HookContext {
+        current_tick: s.pool.current_tick,
+        sqrt_price: s.pool.sqrt_price_q64_64,
+        liquidity: s.pool.liquidity_active,
+        fee_bps: s.pool.fee_bps,
+    });
+    let hook = hooks::get(hook_id);
+    hook.before_mint(&ctx, lower_tick, upper_tick, liquidity_delta)?;
+
+    let tick_spacing = tick_spacing;
     if lower_tick % tick_spacing != 0 || upper_tick % tick_spacing != 0 {
         return Err(ContractError::TickSpacingViolation);
     }
@@ -375,6 +393,8 @@ fn mint_inner(
         });
     }
 
+    hook.after_mint(&ctx, lower_tick, upper_tick, liquidity_delta)?;
+
     Ok((amount0, amount1))
 }
 
@@ -408,8 +428,18 @@ fn burn_inner(
     require_not_paused()?;
     require_initialized()?;
 
+    let (tick_spacing, hook_id) = with_state(|s| (s.config.tick_spacing, s.config.hook_id));
+    let ctx = with_state(|s| HookContext {
+        current_tick: s.pool.current_tick,
+        sqrt_price: s.pool.sqrt_price_q64_64,
+        liquidity: s.pool.liquidity_active,
+        fee_bps: s.pool.fee_bps,
+    });
+    let hook = hooks::get(hook_id);
+    hook.before_burn(&ctx, lower_tick, upper_tick, liquidity_delta)?;
+
     let neg_delta = -(liquidity_delta as i128);
-    let tick_spacing = with_state(|s| s.config.tick_spacing);
+    let tick_spacing = tick_spacing;
     let (current_tick, sqrt_price, fg0, fg1) = with_state(|s| {
         (s.pool.current_tick, s.pool.sqrt_price_q64_64,
          s.pool.fee_growth_global_0_q128, s.pool.fee_growth_global_1_q128)
@@ -457,6 +487,8 @@ fn burn_inner(
             s.pool.liquidity_active = s.pool.liquidity_active.saturating_sub(liquidity_delta);
         });
     }
+
+    hook.after_burn(&ctx, lower_tick, upper_tick, liquidity_delta)?;
 
     Ok((amount0, amount1))
 }
@@ -534,6 +566,15 @@ fn swap_exact_in_inner(
     // Advance oracle BEFORE the swap (captures pre-swap price in observation).
     let (tick_cumulative, spl_q128) = advance_oracle(timestamp);
 
+    let hook_id = with_state(|s| s.config.hook_id);
+    let pre_ctx = with_state(|s| HookContext {
+        current_tick: s.pool.current_tick,
+        sqrt_price: s.pool.sqrt_price_q64_64,
+        liquidity: s.pool.liquidity_active,
+        fee_bps: s.pool.fee_bps,
+    });
+    hooks::get(hook_id).before_swap(&pre_ctx, zero_for_one, amount_in)?;
+
     let (sqrt_price, current_tick, liquidity, fee_bps, protocol_fee_bps, fg0, fg1, tick_spacing) =
         with_state(|s| {
             (
@@ -571,6 +612,15 @@ fn swap_exact_in_inner(
     if result.amount_out < min_amount_out {
         return Err(ContractError::SlippageLimitExceeded);
     }
+
+    let outcome = SwapOutcome {
+        amount_in: result.amount_in,
+        amount_out: result.amount_out,
+        sqrt_price_after: result.sqrt_price_after,
+        tick_after: result.tick_after,
+        ticks_crossed: result.ticks_crossed,
+    };
+    hooks::get(hook_id).after_swap(&pre_ctx, &outcome)?;
 
     // Commit updated pool state.
     with_state(|s| {
@@ -737,7 +787,7 @@ mod tests {
 
     fn init_pool() {
         test_setup(owner(), 10);
-        assert_eq!(initialize_pool(owner(), Q64, 30, 0, 1_000_000), 0);
+        assert_eq!(initialize_pool(owner(), Q64, 30, 0, 1_000_000, 0), 0);
     }
 
     fn add_liquidity() {
@@ -847,7 +897,7 @@ mod tests {
     #[test]
     fn unauthorized_initialize_fails() {
         test_setup(owner(), 10);
-        let result = initialize_pool(alice(), Q64, 30, 0, 0);
+        let result = initialize_pool(alice(), Q64, 30, 0, 0, 0);
         assert_ne!(result, 0); // NotAuthorized
     }
 

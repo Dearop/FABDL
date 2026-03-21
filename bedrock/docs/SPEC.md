@@ -14,7 +14,7 @@ XRPL-in-Time is an isolated, state-forked execution environment seeded from a li
 The environment serves two purposes:
 
 1. **Decision validation** — simulate a proposed LP position or borrow/lend action against real-world state before committing to mainnet
-2. **Risk quantification** — run price-path scenarios through the V3 pool to compute IL, fee yield, and break-even without touching real funds
+2. **Risk quantification** — run price-path scenarios across selected V3 pools to compute IL, fee yield, and break-even without touching real funds
 
 After a user authorises execution, the resulting transaction is submitted to XRPL mainnet. The XRPL-in-Time instance for that session is discarded. Each new session forks fresh from the latest mainnet snapshot.
 
@@ -34,22 +34,23 @@ The initial state of XRPL-in-Time MUST be derived exclusively from a verified XR
 
 After initialisation from the snapshot, XRPL-in-Time MUST NOT accept any inbound state updates from XRPL mainnet. Price does not re-anchor to mainnet mid-session. New liquidity from external actors does not enter. The environment diverges from mainnet immediately and intentionally upon fork. This divergence is the feature.
 
-### INV-3: Token Pair
+### INV-3: Pool Selection Scope
 
-The AMM pool MUST be instantiated with exactly two tokens:
+XRPL-in-Time MUST seed a demo subset of XRPL AMM state using the following fixed profile:
 
-| Role | Asset | Type |
+| Parameter | Value | Notes |
 |---|---|---|
-| Token 0 | **XRP** | Native (`AssetKind::Xrp`) |
-| Token 1 | **RLUSD** | Issued (`AssetKind::Issued`, issuer: Ripple) |
+| `pool_count` | **25** | Number of AMM pools loaded from snapshot |
+| `lp_holders_per_pool` | **10** | Top LP holders by LP balance retained per pool |
+| `replay_window_secs` | **3600** | Default replay horizon (1 hour), configurable |
 
-All LP, borrow, and lend operations within XRPL-in-Time are denominated in this pair. No other pairs are in scope for the initial version.
+Each selected AMM pool is still a two-asset pool (`Token0`/`Token1`) and MUST map to a `PoolState` instance in XRPL-in-Time.
 
-> **Rationale:** XRP/RLUSD is the highest-liquidity institutionally credible pair on XRPL mainnet as of Q1 2026. RLUSD is Ripple's regulated USD stablecoin, providing a stable reference asset for IL and VaR calculations.
+> **Rationale:** This profile gives enough heterogeneity for portfolio-level simulation while remaining tractable for local node seeding and demo repeatability.
 
 ### INV-4: AMM Mathematics
 
-The AMM pool MUST implement Uniswap V3 concentrated liquidity mathematics. Specifically:
+Each seeded AMM pool MUST implement Uniswap V3 concentrated liquidity mathematics. Specifically:
 
 - Price space represented as `sqrt_price_q64_64: u128` in Q64.64 fixed-point format
 - Tick-based price discretisation with base `1.0001` (i.e. `price(i) = 1.0001^i`)
@@ -92,34 +93,53 @@ The environment MUST be programmable. Programmability is provided by the Bedrock
 
 ### 3.1 State Extraction from Firehose
 
-The following XRPL ledger objects MUST be extracted at the snapshot ledger index:
+The following XRPL ledger objects MUST be extracted at the snapshot ledger index for each selected pool:
 
 | XRPL Object | Field | Maps To |
 |---|---|---|
-| `AMM` (XRP/RLUSD pool) | `Amount` | `reserve_xrp` |
-| `AMM` (XRP/RLUSD pool) | `Amount2` | `reserve_rlusd` |
-| `AMM` (XRP/RLUSD pool) | `LPTokenBalance` | reference only |
-| `AccountRoot` (user) | XRP balance | user Token 0 balance |
-| `RippleState` (user/RLUSD) | `Balance` | user Token 1 balance |
+| `AMM` (target pool) | `Amount` | `reserve_0` |
+| `AMM` (target pool) | `Amount2` | `reserve_1` |
+| `AMM` (target pool) | LP token fields | holder selection + LP supply reference |
+| `AccountRoot` (top LP holder) | XRP balance | user XRP balance |
+| `RippleState` (top LP holder / issuer) | `Balance` | user issued-token balances |
 
-All other XRPL state (offers, escrows, NFTs, other AMM pools, other trust lines) is out of scope and MUST NOT be loaded.
+Extraction MUST:
+1. discover/rank candidate AMM pools
+2. select exactly `pool_count = 25`
+3. rank LP holders per selected pool by LP token balance
+4. retain only top `lp_holders_per_pool = 10`
+
+All other XRPL state (non-selected pools, unrelated trust lines, NFTs, escrows) is out of scope and MUST NOT be loaded.
 
 > **Interim:** Until the Firehose hosted service is available (target Q3 2026), state extraction uses XRPL JSON-RPC (`amm_info`, `account_info`, `account_lines`). The extraction interface MUST be abstracted so Firehose drops in without changing downstream code.
 
-### 3.2 Pool Seeding
+### 3.2 Replay Window Configuration (Modifiable)
 
-From the extracted reserves, derive the initial `sqrt_price_q64_64`:
+Replay MUST be configured through a single parameter:
 
 ```
-sqrt_price_q64_64 = floor( sqrt(reserve_rlusd / reserve_xrp) * 2^64 )
+replay_window_secs: u64 = 3600
 ```
 
-Call `initialize_pool` with:
+Implementation requirements:
+- the default is 3600 seconds (1 hour)
+- changing replay horizon MUST require changing this parameter only
+- all replay extraction and seeding components MUST consume this value (no hardcoded time window literals)
+
+### 3.3 Pool Seeding
+
+For each selected pool, derive the initial `sqrt_price_q64_64`:
+
+```
+sqrt_price_q64_64 = floor( sqrt(reserve_1 / reserve_0) * 2^64 )
+```
+
+Call `initialize_pool` per pool with:
 - `sqrt_price`: derived above
 - `fee_bps`: match the live XRPL AMM fee at snapshot time (default 30 = 0.30%)
 - `protocol_fee_bps`: 0 for simulation sessions; configurable for production
 
-Seed initial liquidity as a full-range position (`tickLower = -887272`, `tickUpper = 887272`) using the snapshot reserves. This is mathematically equivalent to the constant-product V2 pool on mainnet and preserves the real price impact profile. Users and VEGA then add concentrated positions on top.
+Seed initial liquidity as a full-range position (`tickLower = -887272`, `tickUpper = 887272`) using snapshot reserves. Then seed LP state for the top 10 holders per pool.
 
 ---
 
@@ -256,7 +276,7 @@ DebtPosition {
 | Metric | Source |
 |---|---|
 | Liquidation price | Derived from collateral value and debt at threshold |
-| Probability of liquidation | Requires XRP/RLUSD volatility model (VEGA quant layer) |
+| Probability of liquidation | Requires per-pool volatility model (VEGA quant layer) |
 | Effective borrowing cost | Interest rate × duration estimate |
 | Health factor over time | VaR-style simulation of collateral price paths |
 
@@ -269,12 +289,15 @@ DebtPosition {
         ↓
 2. Extract XRPL mainnet state via JSON-RPC / Firehose
         ↓
-3. initialize_pool(sqrt_price_from_reserves, fee_bps)
-   seed_full_range_liquidity(reserves)
+3. For each selected pool:
+   - initialize_pool(sqrt_price_from_reserves, fee_bps)
+   - seed_full_range_liquidity(reserves)
+   - seed top-10 LP holder balances
         ↓
 4. VEGA simulates recommended position:
    - mint(tickLower, tickUpper, liquidity)
    - simulate price paths via swap_exact_in
+   - optionally replay recent txs over `replay_window_secs` (default 3600)
    - compute IL, fee yield, break-even
         ↓
 5. User reviews risk report and chooses strategy
@@ -291,8 +314,7 @@ DebtPosition {
 
 | Feature | Reason |
 |---|---|
-| Multiple token pairs | Scope: XRP/RLUSD only |
-| Cross-pool routing / multi-hop swaps | Single pool per contract instance |
+| Cross-pool routing / multi-hop swaps | Deferred; pools are seeded independently |
 | Flash loans | Callback model not suitable for XRPL |
 | Oracle (TWAP) accumulation | Infrastructure present in tick state; not activated |
 | NFT position tokens | XRPL NFT support exists; deferred post-MVP |
@@ -304,9 +326,10 @@ DebtPosition {
 ## 9. Open Questions
 
 1. **Swaps by external users:** Should `swap_exact_in` be callable by non-VEGA actors during a live session, or is it restricted to VEGA's simulation use only?
-2. **Multi-user sessions:** If two users fork from the same snapshot, do they share a single pool instance (shared fee accrual) or get isolated instances? Currently: isolated instances recommended.
+2. **Multi-user sessions:** If two users fork from the same snapshot, do they share seeded pool instances (shared fee accrual) or get isolated instances? Currently: isolated instances recommended.
 3. **Interest rate model for borrow/lend:** Linear (simple) or kinked (Aave-style)? Depends on target utilisation profile.
 4. **Liquidation in simulation context:** Should `liquidate` be callable in XRPL-in-Time sessions, or is it only meaningful on mainnet? Useful for stress-testing collateral positions.
+5. **Pool ranking policy:** Should pool selection by default be TVL-weighted, volume-weighted, or a blended score?
 
 ---
 
