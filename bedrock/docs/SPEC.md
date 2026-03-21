@@ -112,7 +112,18 @@ Extraction MUST:
 
 All other XRPL state (non-selected pools, unrelated trust lines, NFTs, escrows) is out of scope and MUST NOT be loaded.
 
-> **Interim:** Until the Firehose hosted service is available (target Q3 2026), state extraction uses XRPL JSON-RPC (`amm_info`, `account_info`, `account_lines`). The extraction interface MUST be abstracted so Firehose drops in without changing downstream code.
+> **Interim:** Until the Firehose hosted service is available (target Q3 2026), state extraction uses XRPL JSON-RPC. The extraction interface MUST be abstracted so Firehose drops in without changing downstream code.
+>
+> **JSON-RPC query types required (interim):**
+>
+> - `amm_info` — current pool state: reserves (`Amount`/`Amount2`), `TradingFee` (post-vote effective fee), `LPTokenBalance`
+> - `account_tx` on the AMM account — historical transaction list for swap volume replay over `replay_window_secs`
+> - `account_info` — XRP balance for top LP holders
+> - `account_lines` — issued token (RLUSD / LP token) balances for top LP holders
+>
+> **Pool discovery decision (DEFERRED):** XRPL JSON-RPC has no pool enumeration endpoint. `amm_info` requires knowing the asset pair in advance — it cannot scan the ledger for all AMM objects. Pool discovery and TVL/volume-based ranking are Firehose responsibilities and MUST NOT be implemented via JSON-RPC iteration. The interim JSON-RPC implementation MUST use a hardcoded pool registry (list of known asset pairs) as the discovery mechanism. This stub MUST satisfy the same `LedgerStateSource` trait that the Firehose implementation will implement, so discovery can be swapped in without changing downstream code.
+>
+> **LP holder discovery decision (DEFERRED):** `amm_info` returns total `LPTokenBalance` but not individual holder addresses or balances. Holder enumeration and ranking are Firehose responsibilities. The interim implementation MUST accept LP holder addresses as configuration input and verify/rank them via `account_lines`. Do not attempt holder enumeration from JSON-RPC.
 
 ### 3.2 Replay Window Configuration (Modifiable)
 
@@ -172,9 +183,27 @@ After a `mint` is simulated:
 |---|---|
 | Required capital (amount0, amount1) | Return values of `mint` |
 | IL at price P | `burn` at simulated price P, compare to HODL value |
-| Fee yield | `fee_growth_global` delta across simulated swap volume |
-| Break-even price | Price at which `fee_yield = IL` |
+| Fee yield (APR) | Replay `account_tx` swap volume through V3 engine; extract per-position fee share via `fee_growth_inside`; normalise to APR (see below) |
+| Break-even price | Two prices (one upside, one downside) where `fee_yield = IL`; IL is symmetric in log-price space |
 | Active range probability | Requires volatility estimate (VEGA quant layer, not contract) |
+
+**Fee APR formula:**
+
+```text
+fee_growth_inside = fee_growth_global - fee_below(lower_tick) - fee_above(upper_tick)
+
+fees_earned_0 = L_position * (fee_growth_inside_0_now - fee_growth_inside_0_last) / 2^128
+fees_earned_1 = L_position * (fee_growth_inside_1_now - fee_growth_inside_1_last) / 2^128
+
+fees_earned_usd = fees_earned_0 * price_0_usd + fees_earned_1 * price_1_usd
+position_value_usd = amount0_held * price_0_usd + amount1_held * price_1_usd
+
+fee_APR = (fees_earned_usd / position_value_usd) * (seconds_per_year / replay_window_secs)
+```
+
+> **Key constraint:** In V3, a position only earns fees when the pool price is inside `[lower_tick, upper_tick]`. The `fee_growth_inside` accumulator captures only in-range fee accrual, so the APR is automatically correct for the position's concentration. A simple `L_position / L_total` ratio would be wrong — use `fee_growth_inside` from the V3 accounting, which the existing contract already supports.
+>
+> **Volume source:** Historical swap volume is replayed from `account_tx` on the AMM account over `replay_window_secs`. As the local chain accumulates simulated swap history (N seconds), it displaces N seconds of historical data from the tail of the window. Total window always spans `replay_window_secs`.
 
 ### 4.3 Single-Asset vs Multi-Asset Deposit
 

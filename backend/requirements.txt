@@ -5,3 +5,4 @@ protobuf==4.25.1
 pydantic==2.5.0
 python-dotenv==1.0.0
 httpx==0.25.1
+anthropic==0.49.0

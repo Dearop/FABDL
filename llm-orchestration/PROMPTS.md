@@ -46,59 +46,23 @@ PROMPTS.md
 
 \### Prompt Template
 
-
+> **Note:** This is the live template from `llm-orchestration/src/intent_router_service.py`. The user query is injected at the top; the model is instructed to return JSON only with no surrounding text.
 
 ```
 
-You are an intent classifier for a DeFi trading assistant.
+TASK: Classify the user query into a JSON format. RESPOND ONLY WITH JSON, NOTHING ELSE.
 
+USER QUERY: {user_query}
 
-
-Given a user query, extract:
-
-1\. Action: analyze\_risk | execute\_strategy | check\_position | get\_price
-
-2\. Scope: portfolio | specific\_asset | specific\_pool
-
-3\. Parameters: asset names, amounts, time horizons
-
-
+RETURN ONLY THIS JSON FORMAT (no explanation, no extra text):
+{"action": "analyze_risk|execute_strategy|check_position|get_price", "scope": "portfolio|specific_asset|specific_pool", "confidence": 0.0-1.0, "parameters": {}}
 
 Examples:
+- "analyze my portfolio" → {"action":"analyze_risk","scope":"portfolio","confidence":0.95,"parameters":{}}
+- "XRP price" → {"action":"get_price","scope":"specific_asset","confidence":0.9,"parameters":{"asset":"XRP"}}
+- "hedge strategy" → {"action":"execute_strategy","scope":"portfolio","confidence":0.85,"parameters":{"strategy":"conservative"}}
 
-
-
-User: "Analyze my portfolio risk"
-
-Output: {"action": "analyze\_risk", "scope": "portfolio"}
-
-
-
-User: "What's my XRP/USD position worth?"
-
-Output: {"action": "check\_position", "scope": "specific\_pool", "pool": "XRP/USD"}
-
-
-
-User: "Execute the conservative hedge"
-
-Output: {"action": "execute\_strategy", "strategy": "conservative"}
-
-
-
-User: "How much IL do I have?"
-
-Output: {"action": "analyze\_risk", "scope": "portfolio", "focus": "impermanent\_loss"}
-
-
-
-Now classify this query:
-
-{user\_query}
-
-
-
-Output (JSON only, no explanation):
+REMEMBER: RESPOND ONLY WITH JSON. NO WORDS BEFORE OR AFTER.
 
 ```
 
@@ -106,7 +70,7 @@ Output (JSON only, no explanation):
 
 \### Expected Outputs
 
-
+All outputs map to the `IntentRouterOutput` Rust struct: `action`, `scope`, `confidence`, and a nested `parameters` object with optional keys `wallet_address`, `pool`, `focus`, `strategy`.
 
 \*\*Case 1: Risk Analysis\*\*
 
@@ -117,6 +81,8 @@ Output (JSON only, no explanation):
 &#x20; "action": "analyze\_risk",
 
 &#x20; "scope": "portfolio",
+
+&#x20; "confidence": 0.95,
 
 &#x20; "parameters": {
 
@@ -138,9 +104,15 @@ Output (JSON only, no explanation):
 
 &#x20; "action": "execute\_strategy",
 
-&#x20; "strategy\_id": "option\_a",
+&#x20; "scope": "portfolio",
 
-&#x20; "confirmation\_required": true
+&#x20; "confidence": 0.85,
+
+&#x20; "parameters": {
+
+&#x20;   "strategy": "conservative"
+
+&#x20; }
 
 }
 
@@ -156,9 +128,15 @@ Output (JSON only, no explanation):
 
 &#x20; "action": "get\_price",
 
-&#x20; "asset": "XRP",
+&#x20; "scope": "specific\_asset",
 
-&#x20; "quote\_currency": "USD"
+&#x20; "confidence": 0.9,
+
+&#x20; "parameters": {
+
+&#x20;   "asset": "XRP"
+
+&#x20; }
 
 }
 
@@ -220,7 +198,8 @@ Output format: Structured JSON (see examples below)
 
 \### Strategy Generation Prompt
 
-
+The prompt is rendered dynamically from `PortfolioRiskSummary` by the Rust backend.
+Single-position example (one pool):
 
 ```
 
@@ -236,25 +215,61 @@ Portfolio Risk Summary:
 
 \- Current XRP Price: $0.50 USD
 
+\- Fee APR: 15.0%
+
 \- Sharpe Ratio: 1.2
+
+\- VaR (95%, 1-day): $1,200
+
+\- Break-even Range: $0.4200 - $0.6100
 
 
 
 AMM Pool Details:
 
-\- Pool: XRP/USD
-
-\- Your LP Tokens: 2000
-
-\- Pool Reserves: 100,000 XRP / 50,000 USD
-
-\- 24h Trading Volume: $80,000
-
-\- 24h Fee APY: 15%
+\- Pool: XRP/USD, Value: $50000, LP Share: 2.0%, IL: 2.3% (-$1150), Fee APR: 15.0%, 7d Fees: $120, Delta: 1500 XRP
 
 
 
 Task: Generate 3 strategies to manage this position.
+
+```
+
+Multi-pool portfolio example (two or more pools):
+
+```
+
+Portfolio Risk Summary:
+
+\- Total Value: $80,000 USD
+
+\- Impermanent Loss: 1.8% (-$1,440)
+
+\- Delta Exposure: 2,200 XRP (\~$1,100 if XRP drops 10%)
+
+\- 7-Day Fee Income: $210
+
+\- Current XRP Price: $0.50 USD
+
+\- Fee APR: 17.5%
+
+\- Sharpe Ratio: 1.4
+
+\- VaR (95%, 1-day): $1,900
+
+\- Break-even Range: $0.3900 - $0.6400
+
+
+
+AMM Pool Details (all positions):
+
+\- Pool: XRP/USD, Value: $50000, LP Share: 2.0%, IL: 2.3% (-$1150), Fee APR: 15.0%, 7d Fees: $120, Delta: 1500 XRP
+
+\- Pool: XRP/BTC, Value: $30000, LP Share: 1.2%, IL: 1.1% (-$330), Fee APR: 21.0%, 7d Fees: $90, Delta: 700 XRP
+
+
+
+Task: Generate 3 strategies to manage this portfolio.
 
 
 
