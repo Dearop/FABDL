@@ -80,7 +80,7 @@ REMEMBER: RESPOND ONLY WITH JSON. NO WORDS BEFORE OR AFTER."""
                 # Using Ollama CLI (assumes `ollama serve` is running)
                 # First call takes longer as model loads into VRAM
                 env = os.environ.copy()
-                env.setdefault("OLLAMA_HOST", "127.0.0.1:11435")
+                env.setdefault("OLLAMA_HOST", "127.0.0.1:11434")
                 result = subprocess.run(
                     ["ollama", "run", self.llm_model, prompt],
                     capture_output=True,
