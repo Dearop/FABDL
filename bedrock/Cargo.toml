@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "contract",
+    "contract-manager",
     "adapter",
     "xrpl-wasm-macros-stub",
     "xrpl-wasm-std-stub",

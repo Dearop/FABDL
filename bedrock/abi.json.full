@@ -19,8 +19,7 @@
       "parameters": [
         { "name": "lower_tick", "type": "UINT32", "flag": 0, "description": "Lower tick boundary (two's complement for negative ticks)" },
         { "name": "upper_tick", "type": "UINT32", "flag": 0, "description": "Upper tick boundary" },
-        { "name": "liquidity_delta", "type": "UINT64", "flag": 0, "description": "Liquidity amount to add" },
-        { "name": "_pad", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" }
+        { "name": "liquidity_delta", "type": "UINT64", "flag": 0, "description": "Liquidity amount to add" }
       ],
       "returns": {
         "type": "UINT32",
@@ -32,8 +31,7 @@
       "parameters": [
         { "name": "lower_tick", "type": "UINT32", "flag": 0, "description": "Lower tick boundary" },
         { "name": "upper_tick", "type": "UINT32", "flag": 0, "description": "Upper tick boundary" },
-        { "name": "liquidity_delta", "type": "UINT64", "flag": 0, "description": "Liquidity amount to remove" },
-        { "name": "_pad", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" }
+        { "name": "liquidity_delta", "type": "UINT64", "flag": 0, "description": "Liquidity amount to remove" }
       ],
       "returns": {
         "type": "UINT32",
@@ -58,8 +56,7 @@
       "parameters": [
         { "name": "amount_in", "type": "UINT64", "flag": 0, "description": "Exact input amount" },
         { "name": "min_amount_out", "type": "UINT64", "flag": 0, "description": "Minimum acceptable output (slippage guard)" },
-        { "name": "zero_for_one", "type": "UINT8", "flag": 0, "description": "1 = token0 to token1 (price down), 0 = reverse" },
-        { "name": "_pad", "type": "UINT32", "flag": 0, "description": "Reserved (pass 0)" }
+        { "name": "zero_for_one", "type": "UINT8", "flag": 0, "description": "1 = token0 to token1 (price down), 0 = reverse" }
       ],
       "returns": {
         "type": "UINT64",
@@ -70,9 +67,7 @@
       "name": "collect_protocol",
       "parameters": [
         { "name": "max_amount_0", "type": "UINT64", "flag": 0, "description": "Max token0 protocol fees to collect" },
-        { "name": "max_amount_1", "type": "UINT64", "flag": 0, "description": "Max token1 protocol fees to collect" },
-        { "name": "_pad0", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
-        { "name": "_pad1", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" }
+        { "name": "max_amount_1", "type": "UINT64", "flag": 0, "description": "Max token1 protocol fees to collect" }
       ],
       "returns": {
         "type": "UINT64",
@@ -82,10 +77,7 @@
     {
       "name": "set_protocol_fee",
       "parameters": [
-        { "name": "protocol_fee_share_bps", "type": "UINT16", "flag": 0, "description": "Protocol fee share in basis points (max 2500)" },
-        { "name": "_pad0", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
-        { "name": "_pad1", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
-        { "name": "_pad2", "type": "UINT32", "flag": 0, "description": "Reserved (pass 0)" }
+        { "name": "protocol_fee_share_bps", "type": "UINT16", "flag": 0, "description": "Protocol fee share in basis points (max 2500)" }
       ],
       "returns": {
         "type": "UINT32",
@@ -95,10 +87,17 @@
     {
       "name": "set_pause",
       "parameters": [
-        { "name": "paused", "type": "UINT8", "flag": 0, "description": "1 to pause, 0 to unpause" },
-        { "name": "_pad0", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
-        { "name": "_pad1", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
-        { "name": "_pad2", "type": "UINT32", "flag": 0, "description": "Reserved (pass 0)" }
+        { "name": "paused", "type": "UINT8", "flag": 0, "description": "1 to pause, 0 to unpause" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "set_manager",
+      "parameters": [
+        { "name": "manager", "type": "ACCOUNT", "flag": 0, "description": "Address of manager contract" }
       ],
       "returns": {
         "type": "UINT32",

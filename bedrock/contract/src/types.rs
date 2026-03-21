@@ -32,6 +32,7 @@ pub enum ContractError {
     MathOverflow,
     InvalidLiquidityDelta,
     PoolNotInitialized,
+    CrossContractCallFailed,
 }
 
 /// Error code mapping for ABI return values.
@@ -46,6 +47,7 @@ impl ContractError {
             ContractError::MathOverflow => 6,
             ContractError::InvalidLiquidityDelta => 7,
             ContractError::PoolNotInitialized => 8,
+            ContractError::CrossContractCallFailed => 9,
         }
     }
 }

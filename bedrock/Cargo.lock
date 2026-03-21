@@ -53,6 +53,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "uniswap-v3-xrpl-manager"
+version = "0.1.0"
+dependencies = [
+ "uniswap-v3-xrpl-contract",
+ "xrpl-wasm-macros",
+ "xrpl-wasm-std",
+]
+
+[[package]]
 name = "xrpl-wasm-macros"
 version = "0.1.0"
 dependencies = [

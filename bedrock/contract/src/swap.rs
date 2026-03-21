@@ -66,7 +66,6 @@ pub struct SwapResult {
 /// - `tick_spacing`             — pool tick spacing
 /// - `tick_cumulative`          — oracle tick cumulative at swap start (for tick crossing)
 /// - `seconds_per_liquidity_q128` — oracle spl accumulator at swap start
-/// - `timestamp`                — current block timestamp (for tick crossing oracle)
 /// - `ticks`                    — mutable tick map
 /// - `bitmap`                   — mutable tick bitmap
 #[allow(clippy::too_many_arguments)]
@@ -83,7 +82,6 @@ pub fn execute_swap(
     tick_spacing: i32,
     tick_cumulative: i64,
     seconds_per_liquidity_q128: u128,
-    timestamp: u32,
     ticks: &mut TickMap,
     bitmap: &mut TickBitmap,
 ) -> Result<SwapResult, ContractError> {
@@ -203,7 +201,7 @@ pub fn execute_swap(
                 if zero_for_one { fee_growth_global } else { state.fee_growth_global },
                 tick_cumulative,
                 seconds_per_liquidity_q128,
-                timestamp,
+                0,
             );
 
             // Adjust active liquidity: moving right adds net, moving left subtracts.
@@ -296,7 +294,7 @@ mod tests {
         ticks: &mut TickMap, bitmap: &mut TickBitmap,
     ) -> Result<SwapResult, crate::types::ContractError> {
         execute_swap(sp, tick, liq, fee_bps, 0, 0, amount_in, zero_for_one, limit, 10,
-                     0, 0, 0, ticks, bitmap)
+                     0, 0, ticks, bitmap)
     }
 
     #[test]

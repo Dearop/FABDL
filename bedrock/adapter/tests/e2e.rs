@@ -4,7 +4,7 @@
 /// path selection, automatic fallback, and pre-submission validation.
 
 use uniswap_v3_xrpl_adapter::{AdapterError, DualPathAdapter, ExecutionPath, SwapRequest};
-use uniswap_v3_xrpl_contract::{math::Q64, test_setup};
+use uniswap_v3_xrpl_contract::test_setup;
 
 fn owner() -> [u8; 20] { [1u8; 20] }
 fn alice() -> [u8; 20] { [2u8; 20] }
@@ -12,8 +12,8 @@ fn alice() -> [u8; 20] { [2u8; 20] }
 /// Initialise a pool with liquidity ready for adapter-level swap tests.
 fn setup_pool_with_liquidity() {
     test_setup(owner(), 10);
-    uniswap_v3_xrpl_contract::initialize_pool(owner(), Q64, 30, 0, 0);
-    uniswap_v3_xrpl_contract::mint(owner(), (-1000_i32) as u32, 1000, 1_000_000_000);
+    uniswap_v3_xrpl_contract::initialize_pool(owner(), 0u64, 1u64, 30, 0);
+    uniswap_v3_xrpl_contract::mint(owner(), (-1000_i32) as u32, 1000, 1_000_000_000, 0);
 }
 
 fn swap_req(amount_in: u64, zero_for_one: bool) -> SwapRequest {
@@ -22,7 +22,6 @@ fn swap_req(amount_in: u64, zero_for_one: bool) -> SwapRequest {
         amount_in,
         min_amount_out: amount_in * 99 / 100,
         zero_for_one,
-        sqrt_price_limit: if zero_for_one { Q64 / 2 } else { Q64 * 2 },
     }
 }
 
@@ -94,7 +93,6 @@ fn zero_input_rejected_before_submission() {
         amount_in: 0,
         min_amount_out: 0,
         zero_for_one: false,
-        sqrt_price_limit: Q64 * 2,
     };
     let err = adapter.execute_with_fallback(&req).unwrap_err();
     assert!(matches!(err, AdapterError::ContractError(_)),
@@ -111,7 +109,6 @@ fn insufficient_min_out_rejected_before_submission() {
         amount_in: 10_000,
         min_amount_out: 1,
         zero_for_one: false,
-        sqrt_price_limit: Q64 * 2,
     };
     let err = adapter.execute_with_fallback(&req).unwrap_err();
     assert!(matches!(err, AdapterError::ContractError(_)));
@@ -127,7 +124,6 @@ fn exact_99pct_min_out_is_accepted() {
         amount_in: 10_000,
         min_amount_out: 9_900,
         zero_for_one: false,
-        sqrt_price_limit: Q64 * 2,
     };
     let receipt = adapter.execute_with_fallback(&req).unwrap();
     assert!(receipt.amount_out > 0);
@@ -162,17 +158,11 @@ fn swap_larger_than_pool_returns_partial_fill() {
     setup_pool_with_liquidity();
     let adapter = DualPathAdapter::new(true, true, false);
 
-    // Swap amount far exceeds pool depth; pool will fill what it can.
-    // The adapter's slippage check will reject if min_out > actual out.
-    // We set min_out = 0 to observe the raw behaviour — but the adapter's
-    // own floor is 99% of input, so we must satisfy that.
-    // Instead: use a modest large amount.
     let req = SwapRequest {
         sender: alice(),
         amount_in: 100_000,
         min_amount_out: 99_000,
         zero_for_one: false,
-        sqrt_price_limit: Q64 * 10,
     };
     // Either succeeds with meaningful output, or fails the slippage check
     // (price impact is large). Either way it must not panic.

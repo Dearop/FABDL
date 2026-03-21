@@ -1,0 +1,96 @@
+{
+  "contract_name": "my-contract2",
+  "functions": [
+    {
+      "name": "initialize_pool",
+      "parameters": [
+        { "name": "sqrt_price_q64_64", "type": "UINT32", "flag": 0, "description": "Initial sqrt price lower 32 bits" },
+        { "name": "fee_bps", "type": "UINT16", "flag": 0, "description": "LP fee in basis points (e.g. 30 = 0.3%)" },
+        { "name": "protocol_fee_share_bps", "type": "UINT16", "flag": 0, "description": "Protocol share of fee in basis points" },
+        { "name": "timestamp", "type": "UINT32", "flag": 0, "description": "Current block timestamp in seconds" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "mint",
+      "parameters": [
+        { "name": "lower_tick", "type": "UINT32", "flag": 0, "description": "Lower tick boundary (two's complement for negative ticks)" },
+        { "name": "upper_tick", "type": "UINT32", "flag": 0, "description": "Upper tick boundary (two's complement for negative ticks)" },
+        { "name": "liquidity_delta", "type": "UINT32", "flag": 0, "description": "Liquidity amount to add" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "burn",
+      "parameters": [
+        { "name": "lower_tick", "type": "UINT32", "flag": 0, "description": "Lower tick boundary (two's complement for negative ticks)" },
+        { "name": "upper_tick", "type": "UINT32", "flag": 0, "description": "Upper tick boundary (two's complement for negative ticks)" },
+        { "name": "liquidity_delta", "type": "UINT32", "flag": 0, "description": "Liquidity amount to remove" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "collect",
+      "parameters": [
+        { "name": "lower_tick", "type": "UINT32", "flag": 0, "description": "Lower tick boundary (two's complement for negative ticks)" },
+        { "name": "upper_tick", "type": "UINT32", "flag": 0, "description": "Upper tick boundary (two's complement for negative ticks)" },
+        { "name": "max_amount_0", "type": "UINT32", "flag": 0, "description": "Max token0 to collect" },
+        { "name": "max_amount_1", "type": "UINT32", "flag": 0, "description": "Max token1 to collect" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "swap_exact_in",
+      "parameters": [
+        { "name": "amount_in", "type": "UINT32", "flag": 0, "description": "Exact input amount" },
+        { "name": "min_amount_out", "type": "UINT32", "flag": 0, "description": "Minimum acceptable output (slippage guard)" },
+        { "name": "zero_for_one", "type": "UINT16", "flag": 0, "description": "1 = token0 to token1, 0 = reverse" },
+        { "name": "sqrt_price_limit", "type": "UINT32", "flag": 0, "description": "Hard price boundary" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "Amount out (0 on failure)"
+      }
+    },
+    {
+      "name": "set_protocol_fee",
+      "parameters": [
+        { "name": "protocol_fee_share_bps", "type": "UINT16", "flag": 0, "description": "Protocol fee share in basis points (max 2500)" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "set_pause",
+      "parameters": [
+        { "name": "paused", "type": "UINT16", "flag": 0, "description": "1 to pause, 0 to unpause" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "set_manager",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    }
+  ]
+}

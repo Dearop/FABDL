@@ -4,13 +4,7 @@
 /// word_pos  = tick / 256  (signed integer)
 /// bit_pos   = (tick % 256 + 256) % 256  (always 0..255)
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::BTreeMap;
-
-#[cfg(target_arch = "wasm32")]
-extern crate alloc;
-#[cfg(target_arch = "wasm32")]
-use alloc::collections::BTreeMap;
+const MAX_BITMAP_WORDS: usize = 8;
 
 /// A single 256-bit word stored as four u64 limbs, little-endian.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -32,27 +26,18 @@ impl Word256 {
         self.0[limb] & (1u64 << (bit % 64)) != 0
     }
 
-    /// Scan for next set bit at or above `start_bit` (searching upward).
-    /// Returns Some(bit) or None if none set in remaining positions.
     pub fn next_initialized_above(&self, start_bit: u8) -> Option<u8> {
         for bit in start_bit..=255 {
-            if self.is_set(bit) {
-                return Some(bit);
-            }
+            if self.is_set(bit) { return Some(bit); }
         }
         None
     }
 
-    /// Scan for next set bit at or below `start_bit` (searching downward).
     pub fn next_initialized_below(&self, start_bit: u8) -> Option<u8> {
         let mut bit = start_bit;
         loop {
-            if self.is_set(bit) {
-                return Some(bit);
-            }
-            if bit == 0 {
-                return None;
-            }
+            if self.is_set(bit) { return Some(bit); }
+            if bit == 0 { return None; }
             bit -= 1;
         }
     }
@@ -67,18 +52,41 @@ impl Word256 {
 // ---------------------------------------------------------------------------
 
 pub struct TickBitmap {
-    pub words: BTreeMap<i16, Word256>,
+    pub word_keys: [i16; MAX_BITMAP_WORDS],
+    pub word_vals: [Word256; MAX_BITMAP_WORDS],
+    pub len: usize,
 }
+
+const DEFAULT_WORD256: Word256 = Word256([0u64; 4]);
 
 impl TickBitmap {
     pub fn new() -> Self {
         Self {
-            words: BTreeMap::new(),
+            word_keys: [0i16; MAX_BITMAP_WORDS],
+            word_vals: [DEFAULT_WORD256; MAX_BITMAP_WORDS],
+            len: 0,
         }
     }
 
+    fn find(&self, key: i16) -> Option<usize> {
+        for i in 0..self.len {
+            if self.word_keys[i] == key { return Some(i); }
+        }
+        None
+    }
+
+    fn get_or_insert(&mut self, key: i16) -> &mut Word256 {
+        if let Some(i) = self.find(key) {
+            return &mut self.word_vals[i];
+        }
+        let i = self.len;
+        self.word_keys[i] = key;
+        self.word_vals[i] = DEFAULT_WORD256;
+        self.len += 1;
+        &mut self.word_vals[i]
+    }
+
     fn word_and_bit(tick: i32, tick_spacing: i32) -> (i16, u8) {
-        // Only aligned ticks are addressable.
         debug_assert_eq!(tick % tick_spacing, 0);
         let compressed = tick / tick_spacing;
         let word_pos = (compressed >> 8) as i16;
@@ -86,28 +94,24 @@ impl TickBitmap {
         (word_pos, bit_pos)
     }
 
-    /// Flip the initialized state of a tick (toggle).
     pub fn flip_tick(&mut self, tick: i32, tick_spacing: i32) {
         let (word_pos, bit_pos) = Self::word_and_bit(tick, tick_spacing);
-        let word = self.words.entry(word_pos).or_default();
+        let word = self.get_or_insert(word_pos);
         if word.is_set(bit_pos) {
             word.clear_bit(bit_pos);
         } else {
             word.set_bit(bit_pos);
         }
-        // Remove empty words to keep map sparse.
-        if self.words.get(&word_pos).map_or(false, |w| w.is_empty()) {
-            self.words.remove(&word_pos);
+        // Remove empty words.
+        if let Some(i) = self.find(word_pos) {
+            if self.word_vals[i].is_empty() {
+                self.len -= 1;
+                self.word_keys[i] = self.word_keys[self.len];
+                self.word_vals[i] = self.word_vals[self.len];
+            }
         }
     }
 
-    /// Find the next initialized tick in the swap direction.
-    ///
-    /// `lte = true`  → search downward (zero_for_one swap)
-    /// `lte = false` → search upward   (one_for_zero swap)
-    ///
-    /// Returns (tick, initialized) where initialized = true if an initialized
-    /// tick was found, false if we hit a word boundary with no initialized tick.
     pub fn next_initialized_tick_within_one_word(
         &self,
         tick: i32,
@@ -116,29 +120,23 @@ impl TickBitmap {
     ) -> (i32, bool) {
         let compressed = tick / tick_spacing;
         if lte {
-            let (word_pos, bit_pos) = {
-                let w = (compressed >> 8) as i16;
-                let b = ((compressed % 256 + 256) % 256) as u8;
-                (w, b)
-            };
-            if let Some(word) = self.words.get(&word_pos) {
-                if let Some(found_bit) = word.next_initialized_below(bit_pos) {
-                    let found_compressed =
-                        (word_pos as i32) * 256 + found_bit as i32;
+            let word_pos = (compressed >> 8) as i16;
+            let bit_pos = ((compressed % 256 + 256) % 256) as u8;
+            if let Some(i) = self.find(word_pos) {
+                if let Some(found_bit) = self.word_vals[i].next_initialized_below(bit_pos) {
+                    let found_compressed = (word_pos as i32) * 256 + found_bit as i32;
                     return (found_compressed * tick_spacing, true);
                 }
             }
-            // No initialized tick in this word — return word boundary.
             let boundary_compressed = (word_pos as i32) * 256;
             (boundary_compressed * tick_spacing, false)
         } else {
             let compressed_next = compressed + 1;
             let word_pos = (compressed_next >> 8) as i16;
             let bit_pos = ((compressed_next % 256 + 256) % 256) as u8;
-            if let Some(word) = self.words.get(&word_pos) {
-                if let Some(found_bit) = word.next_initialized_above(bit_pos) {
-                    let found_compressed =
-                        (word_pos as i32) * 256 + found_bit as i32;
+            if let Some(i) = self.find(word_pos) {
+                if let Some(found_bit) = self.word_vals[i].next_initialized_above(bit_pos) {
+                    let found_compressed = (word_pos as i32) * 256 + found_bit as i32;
                     return (found_compressed * tick_spacing, true);
                 }
             }
@@ -161,7 +159,6 @@ mod tests {
         let mut bm = TickBitmap::new();
         bm.flip_tick(100, 10);
         bm.flip_tick(200, 10);
-
         let (tick, init) = bm.next_initialized_tick_within_one_word(250, 10, true);
         assert!(init);
         assert_eq!(tick, 200);
@@ -171,9 +168,9 @@ mod tests {
     fn flip_twice_removes() {
         let mut bm = TickBitmap::new();
         bm.flip_tick(100, 10);
-        bm.flip_tick(100, 10); // toggle off
+        bm.flip_tick(100, 10);
         let (_, init) = bm.next_initialized_tick_within_one_word(200, 10, true);
-        assert!(!init, "tick should have been removed after double flip");
+        assert!(!init);
     }
 
     #[test]

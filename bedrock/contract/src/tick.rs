@@ -1,57 +1,80 @@
 /// Per-tick state and update logic.
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::collections::BTreeMap;
-
-#[cfg(target_arch = "wasm32")]
-extern crate alloc;
-#[cfg(target_arch = "wasm32")]
-use alloc::collections::BTreeMap;
-
 use crate::types::ContractError;
+
+const MAX_TICKS: usize = 64;
+
+const DEFAULT_TICK_STATE: TickState = TickState {
+    liquidity_gross: 0,
+    liquidity_net: 0,
+    fee_growth_outside_0_q128: 0,
+    fee_growth_outside_1_q128: 0,
+    seconds_outside: 0,
+    tick_cumulative_outside: 0,
+    seconds_per_liquidity_outside_q128: 0,
+};
 
 #[derive(Clone, Copy, Default)]
 pub struct TickState {
-    /// Total liquidity referencing this tick (gross, always >= 0).
     pub liquidity_gross: u128,
-    /// Net liquidity change when tick is crossed left-to-right.
     pub liquidity_net: i128,
-    /// Fee growth outside this tick boundary (token0), Q128.
     pub fee_growth_outside_0_q128: u128,
-    /// Fee growth outside this tick boundary (token1), Q128.
     pub fee_growth_outside_1_q128: u128,
-    /// Seconds spent outside this tick.
     pub seconds_outside: u64,
-    /// Cumulative (tick × seconds) outside this boundary. i64 matches the
-    /// oracle accumulator width (tick ≤ 887272, seconds ≤ 2^32, product fits i64).
     pub tick_cumulative_outside: i64,
-    /// Seconds-per-unit-liquidity outside this boundary, Q128.
     pub seconds_per_liquidity_outside_q128: u128,
 }
 
-pub struct TickMap(pub BTreeMap<i32, TickState>);
+pub struct TickMap {
+    pub keys: [i32; MAX_TICKS],
+    pub vals: [TickState; MAX_TICKS],
+    pub len: usize,
+}
 
 impl TickMap {
     pub fn new() -> Self {
-        Self(BTreeMap::new())
+        Self {
+            keys: [0; MAX_TICKS],
+            vals: [DEFAULT_TICK_STATE; MAX_TICKS],
+            len: 0,
+        }
+    }
+
+    fn find(&self, tick: i32) -> Option<usize> {
+        for i in 0..self.len {
+            if self.keys[i] == tick { return Some(i); }
+        }
+        None
     }
 
     pub fn get(&self, tick: i32) -> TickState {
-        self.0.get(&tick).copied().unwrap_or_default()
+        match self.find(tick) {
+            Some(i) => self.vals[i],
+            None => DEFAULT_TICK_STATE,
+        }
     }
 
     pub fn set(&mut self, tick: i32, state: TickState) {
         if state.liquidity_gross == 0 && state.fee_growth_outside_0_q128 == 0 {
-            self.0.remove(&tick);
+            // Remove entry if it exists.
+            if let Some(i) = self.find(tick) {
+                self.len -= 1;
+                self.keys[i] = self.keys[self.len];
+                self.vals[i] = self.vals[self.len];
+            }
         } else {
-            self.0.insert(tick, state);
+            match self.find(tick) {
+                Some(i) => { self.vals[i] = state; }
+                None => {
+                    let i = self.len;
+                    self.keys[i] = tick;
+                    self.vals[i] = state;
+                    self.len += 1;
+                }
+            }
         }
     }
 
-    /// Apply a liquidity delta to a tick boundary.
-    ///
-    /// Returns new `liquidity_gross` so the caller can decide whether to
-    /// flip the bitmap.
     pub fn update(
         &mut self,
         tick: i32,
@@ -59,7 +82,7 @@ impl TickMap {
         liquidity_delta: i128,
         fee_growth_global_0: u128,
         fee_growth_global_1: u128,
-        upper: bool, // true → this is the upper boundary of a range
+        upper: bool,
     ) -> Result<(u128, bool), ContractError> {
         let mut t = self.get(tick);
         let liquidity_gross_before = t.liquidity_gross;
@@ -74,11 +97,9 @@ impl TickMap {
                 .ok_or(ContractError::InvalidLiquidityDelta)?
         };
 
-        // Flipped: tick transitions from uninitialized → initialized or back.
         let flipped = (liquidity_gross_after == 0) != (liquidity_gross_before == 0);
 
         if liquidity_gross_before == 0 {
-            // Initialize outside accumulators when first referenced.
             if tick <= current_tick {
                 t.fee_growth_outside_0_q128 = fee_growth_global_0;
                 t.fee_growth_outside_1_q128 = fee_growth_global_1;
@@ -87,7 +108,6 @@ impl TickMap {
 
         t.liquidity_gross = liquidity_gross_after;
 
-        // Net liquidity: upper tick subtracts, lower tick adds.
         if upper {
             t.liquidity_net = t
                 .liquidity_net
@@ -104,13 +124,6 @@ impl TickMap {
         Ok((liquidity_gross_after, flipped))
     }
 
-    /// Flip outside accumulators when a tick is crossed during a swap.
-    ///
-    /// `tick_cumulative` and `seconds_per_liquidity_q128` are the global oracle
-    /// accumulators at the moment of crossing (pre-computed by the swap caller).
-    /// `time` is the current block timestamp.
-    ///
-    /// Returns the `liquidity_net` at the crossed tick.
     pub fn cross(
         &mut self,
         tick: i32,
@@ -134,7 +147,6 @@ impl TickMap {
         t.liquidity_net
     }
 
-    /// Compute fee growth inside [lower_tick, upper_tick].
     pub fn fee_growth_inside(
         &self,
         lower_tick: i32,
@@ -146,7 +158,6 @@ impl TickMap {
         let lower = self.get(lower_tick);
         let upper = self.get(upper_tick);
 
-        // fee_growth_below_lower
         let (fgb0, fgb1) = if current_tick >= lower_tick {
             (lower.fee_growth_outside_0_q128, lower.fee_growth_outside_1_q128)
         } else {
@@ -156,7 +167,6 @@ impl TickMap {
             )
         };
 
-        // fee_growth_above_upper
         let (fga0, fga1) = if current_tick < upper_tick {
             (upper.fee_growth_outside_0_q128, upper.fee_growth_outside_1_q128)
         } else {
@@ -186,7 +196,7 @@ mod tests {
         let mut tm = TickMap::new();
         let (gross, flipped) = tm.update(100, 0, 500, 0, 0, false).unwrap();
         assert_eq!(gross, 500);
-        assert!(flipped, "should flip from uninitialized to initialized");
+        assert!(flipped);
     }
 
     #[test]
@@ -195,19 +205,16 @@ mod tests {
         tm.update(100, 0, 500, 0, 0, false).unwrap();
         let (gross, flipped) = tm.update(100, 0, -500, 0, 0, false).unwrap();
         assert_eq!(gross, 0);
-        assert!(flipped, "should flip back to uninitialized");
+        assert!(flipped);
     }
 
     #[test]
     fn cross_flips_outside_accumulators() {
         let mut tm = TickMap::new();
-        // Initialize tick at 100, current tick = 50 (below), so outside = 0.
         tm.update(100, 50, 1000, 500, 300, false).unwrap();
-        // Cross with global fees = 500, 300.
         let lnet = tm.cross(100, 500, 300, 0, 0, 0);
         assert_eq!(lnet, 1000);
         let t = tm.get(100);
-        // outside should now be global - previous_outside = 500 - 0 = 500
         assert_eq!(t.fee_growth_outside_0_q128, 500);
     }
 
@@ -216,11 +223,7 @@ mod tests {
         let mut tm = TickMap::new();
         tm.update(-100, 0, 1000, 0, 0, false).unwrap();
         tm.update(100, 0, 1000, 0, 0, true).unwrap();
-        // current_tick = 0, global fees = 1000 each
         let (fg0, fg1) = tm.fee_growth_inside(-100, 100, 0, 1000, 1000);
-        // Both lower and upper outside = 0 (tick <= current_tick initializes to global),
-        // so inside = global - below - above = 1000 - 0 - 0 = 1000... but depends on init.
-        // Just verify it returns without panic.
         let _ = (fg0, fg1);
     }
 }

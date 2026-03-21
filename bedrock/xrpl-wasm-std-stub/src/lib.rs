@@ -58,6 +58,55 @@ pub mod host {
         }
     }
 
+    /// Cross-contract invocation.
+    ///
+    /// On WASM: calls the Bedrock host import `bedrock_invoke`, which executes
+    /// the named function on the target contract within the same transaction.
+    /// On native: returns Err(()) — callers supply direct function calls in tests.
+    pub mod contract {
+        /// Invoke a function on another deployed contract.
+        ///
+        /// - `address`  : 20-byte contract account id
+        /// - `function` : function name (ASCII, no null terminator)
+        /// - `params`   : serialised parameter blob (little-endian, matches ABI wire format)
+        ///
+        /// Returns the raw result bytes on success, or Err(()) on failure.
+        #[cfg(not(target_arch = "wasm32"))]
+        pub fn invoke(_address: &[u8; 20], _function: &str, _params: &[u8]) -> Result<i32, ()> {
+            // Native: callers must simulate cross-contract calls via direct in-process calls.
+            Err(())
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        pub fn invoke(address: &[u8; 20], function: &str, params: &[u8]) -> Result<i32, ()> {
+            extern "C" {
+                /// Bedrock host import: invoke a function on another contract.
+                ///
+                /// contract_ptr / contract_len : 20-byte account id
+                /// fn_ptr / fn_len             : function name UTF-8
+                /// params_ptr / params_len     : serialised params blob
+                ///
+                /// Returns the i32 result of the invoked function, or -1 on error.
+                fn bedrock_invoke(
+                    contract_ptr: *const u8,
+                    contract_len: u32,
+                    fn_ptr: *const u8,
+                    fn_len: u32,
+                    params_ptr: *const u8,
+                    params_len: u32,
+                ) -> i32;
+            }
+            let ret = unsafe {
+                bedrock_invoke(
+                    address.as_ptr(), 20,
+                    function.as_ptr(), function.len() as u32,
+                    params.as_ptr(), params.len() as u32,
+                )
+            };
+            if ret < 0 { Err(()) } else { Ok(ret) }
+        }
+    }
+
     pub mod transaction {
         /// The account ID type: a 20-byte XRPL account hash.
         pub type AccountId = [u8; 20];

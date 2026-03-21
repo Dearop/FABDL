@@ -60,6 +60,9 @@ pub(crate) struct PoolState {
 
 pub(crate) struct ContractConfig {
     pub owner: AccountId,
+    /// Address of the manager contract that may call admin functions.
+    /// All-zeros means no manager set yet (manager not deployed).
+    pub manager: AccountId,
     pub paused: bool,
     pub max_slippage_bps: u16,
     pub tick_spacing: i32,
@@ -68,7 +71,6 @@ pub(crate) struct ContractConfig {
 pub(crate) struct ContractState {
     pub pool: PoolState,
     pub config: ContractConfig,
-    pub oracle: OracleBuffer,
     pub ticks: TickMap,
     pub bitmap: TickBitmap,
     pub positions: PositionMap,
@@ -88,16 +90,14 @@ impl ContractState {
                 protocol_fees_0: 0,
                 protocol_fees_1: 0,
                 initialized: false,
-                seconds_per_liquidity_q128: 0,
-                last_block_timestamp: 0,
             },
             config: ContractConfig {
                 owner: [0u8; 20],
+                manager: [0u8; 20],
                 paused: false,
                 max_slippage_bps: 100, // 1% hard cap
                 tick_spacing: 10,
             },
-            oracle: OracleBuffer::new(),
             ticks: TickMap::new(),
             bitmap: TickBitmap::new(),
             positions: PositionMap::new(),
@@ -191,38 +191,6 @@ macro_rules! with_storage {
 }
 
 // ---------------------------------------------------------------------------
-// Oracle helpers
-// ---------------------------------------------------------------------------
-
-/// Advance the global oracle accumulators to `time` and write a new
-/// observation.  Must be called at the START of each swap (before price
-/// changes) so the observation captures the price *entering* this block.
-///
-/// Returns `(tick_cumulative, seconds_per_liquidity_q128)` after the update,
-/// for use by tick-crossing inside `execute_swap`.
-fn advance_oracle(time: u32) -> (i64, u128) {
-    with_state(|s| {
-        if !s.pool.initialized { return (0, 0); }
-
-        let last_time = s.pool.last_block_timestamp;
-        let delta = time.wrapping_sub(last_time) as u128;
-
-        // Update global seconds-per-liquidity.
-        if delta > 0 && s.pool.liquidity_active > 0 {
-            // Same Q64-precision formula as oracle::transform.
-            let increment = (delta << 64) / s.pool.liquidity_active;
-            s.pool.seconds_per_liquidity_q128 =
-                s.pool.seconds_per_liquidity_q128.wrapping_add(increment);
-        }
-        s.pool.last_block_timestamp = time;
-
-        // Write oracle observation (no-op if same block).
-        let (tc, spl) = s.oracle.write(time, s.pool.current_tick, s.pool.liquidity_active);
-        (tc, spl)
-    })
-}
-
-// ---------------------------------------------------------------------------
 // Guards
 // ---------------------------------------------------------------------------
 
@@ -234,7 +202,11 @@ fn require_not_paused() -> Result<(), ContractError> {
 
 fn require_owner(sender: AccountId) -> Result<(), ContractError> {
     with_state(|s| {
-        if s.config.owner != sender { Err(ContractError::NotAuthorized) } else { Ok(()) }
+        if s.config.owner != sender && s.config.manager != sender {
+            Err(ContractError::NotAuthorized)
+        } else {
+            Ok(())
+        }
     })
 }
 
@@ -249,18 +221,18 @@ fn require_initialized() -> Result<(), ContractError> {
 // ---------------------------------------------------------------------------
 
 /// @xrpl-function initialize_pool
-/// @param sqrt_price_q64_64 UINT128 - Initial sqrt price in Q64.64
+/// @param sqrt_price_lo UINT64 - Lower 64 bits of initial sqrt price in Q64.64
+/// @param sqrt_price_hi UINT64 - Upper 64 bits of initial sqrt price in Q64.64
 /// @param fee_bps UINT16 - LP fee in basis points (e.g. 30 = 0.3%)
 /// @param protocol_fee_share_bps UINT16 - Protocol's share of fee in bps
-/// @param timestamp UINT32 - Current block timestamp (seconds)
 /// @return UINT32 - 0 on success, error code otherwise
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn initialize_pool(
     sender: AccountId,
-    sqrt_price_q64_64: u128,
+    sqrt_price_lo: u64,
+    sqrt_price_hi: u64,
     fee_bps: u16,
     protocol_fee_share_bps: u16,
-    timestamp: u32,
 ) -> u32 {
     with_storage!({
         wasm_trace!("initialize_pool");
@@ -269,6 +241,7 @@ pub fn initialize_pool(
             Ok(_) => {}
         }
 
+        let sqrt_price_q64_64 = (sqrt_price_lo as u128) | ((sqrt_price_hi as u128) << 64);
         let fee_clamped = fee_bps.min(10_000);
         let price = sqrt_price_q64_64.max(1u128 << 32);
         with_state(|s| {
@@ -276,9 +249,7 @@ pub fn initialize_pool(
             s.pool.current_tick = math::tick_at_sqrt_price(price);
             s.pool.fee_bps = fee_clamped;
             s.pool.protocol_fee_share_bps = protocol_fee_share_bps.min(2_500);
-            s.pool.last_block_timestamp = timestamp;
             s.pool.initialized = true;
-            s.oracle.initialize(timestamp);
         });
 
         0
@@ -288,18 +259,20 @@ pub fn initialize_pool(
 /// @xrpl-function mint
 /// @param lower_tick UINT32 - Lower tick boundary (two's-complement; pass e.g. 0xFFFFFC18 for -1000)
 /// @param upper_tick UINT32 - Upper tick boundary (two's-complement)
-/// @param liquidity_delta UINT128 - Positive liquidity amount to add
+/// @param liquidity_delta UINT64 - Positive liquidity amount to add
+/// @param _pad UINT64 - Reserved (must be 0)
 /// @return UINT32 - 0 on success
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn mint(
     sender: AccountId,
     lower_tick: u32,
     upper_tick: u32,
-    liquidity_delta: u128,
+    liquidity_delta: u64,
+    _pad: u64,
 ) -> u32 {
     with_storage!({
         wasm_trace!("mint");
-        match mint_inner(sender, lower_tick as i32, upper_tick as i32, liquidity_delta) {
+        match mint_inner(sender, lower_tick as i32, upper_tick as i32, liquidity_delta as u128) {
             Ok(_) => 0,
             Err(e) => e.code(),
         }
@@ -378,18 +351,20 @@ fn mint_inner(
 /// @xrpl-function burn
 /// @param lower_tick UINT32 - Lower tick boundary (two's-complement; pass e.g. 0xFFFFFC18 for -1000)
 /// @param upper_tick UINT32 - Upper tick boundary (two's-complement)
-/// @param liquidity_delta UINT128 - Positive liquidity amount to remove
+/// @param liquidity_delta UINT64 - Positive liquidity amount to remove
+/// @param _pad UINT64 - Reserved (must be 0)
 /// @return UINT32 - 0 on success
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn burn(
     sender: AccountId,
     lower_tick: u32,
     upper_tick: u32,
-    liquidity_delta: u128,
+    liquidity_delta: u64,
+    _pad: u64,
 ) -> u32 {
     with_storage!({
         wasm_trace!("burn");
-        match burn_inner(sender, lower_tick as i32, upper_tick as i32, liquidity_delta) {
+        match burn_inner(sender, lower_tick as i32, upper_tick as i32, liquidity_delta as u128) {
             Ok(_) => 0,
             Err(e) => e.code(),
         }
@@ -487,8 +462,7 @@ pub fn collect(
 /// @param amount_in UINT64 - Exact input amount
 /// @param min_amount_out UINT64 - Minimum acceptable output (slippage guard)
 /// @param zero_for_one UINT8 - 1 = token0→token1 (price down), 0 = reverse
-/// @param sqrt_price_limit_q64_64 UINT128 - Hard price boundary
-/// @param timestamp UINT32 - Current block timestamp (seconds)
+/// @param _pad UINT32 - Reserved (must be 0)
 /// @return UINT64 - Amount out (0 on failure)
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn swap_exact_in(
@@ -496,12 +470,14 @@ pub fn swap_exact_in(
     amount_in: u64,
     min_amount_out: u64,
     zero_for_one: u8,
-    sqrt_price_limit_q64_64: u128,
-    timestamp: u32,
+    _pad: u32,
 ) -> u64 {
     with_storage!({
         wasm_trace!("swap_exact_in");
-        match swap_exact_in_inner(amount_in, min_amount_out, zero_for_one != 0, sqrt_price_limit_q64_64, timestamp) {
+        let direction = zero_for_one != 0;
+        // Price limit: minimum possible for downward swaps, maximum for upward.
+        let sqrt_price_limit = if direction { 1u128 } else { u128::MAX };
+        match swap_exact_in_inner(amount_in, min_amount_out, direction, sqrt_price_limit) {
             Ok(out) => out,
             Err(_) => 0,
         }
@@ -513,7 +489,6 @@ fn swap_exact_in_inner(
     min_amount_out: u64,
     zero_for_one: bool,
     sqrt_price_limit: u128,
-    timestamp: u32,
 ) -> Result<u64, ContractError> {
     require_not_paused()?;
     require_initialized()?;
@@ -528,8 +503,7 @@ fn swap_exact_in_inner(
         return Err(ContractError::SlippageLimitExceeded);
     }
 
-    // Advance oracle BEFORE the swap (captures pre-swap price in observation).
-    let (tick_cumulative, spl_q128) = advance_oracle(timestamp);
+    let (tick_cumulative, spl_q128) = (0i64, 0u128);
 
     let (sqrt_price, current_tick, liquidity, fee_bps, protocol_fee_bps, fg0, fg1, tick_spacing) =
         with_state(|s| {
@@ -559,7 +533,6 @@ fn swap_exact_in_inner(
             tick_spacing,
             tick_cumulative,
             spl_q128,
-            timestamp,
             &mut s.ticks,
             &mut s.bitmap,
         )
@@ -588,62 +561,19 @@ fn swap_exact_in_inner(
     Ok(result.amount_out)
 }
 
-/// @xrpl-function observe
-/// @param seconds_agos_packed UINT64 - Up to 4 × u16 seconds-ago values packed LE
-/// @param timestamp UINT32 - Current block timestamp
-/// @return UINT64 - Packed (tick_cumulative_0: i32 << 32 | tick_cumulative_1: i32)
-///                  for first two observations. 0 if oracle not ready.
-#[cfg_attr(target_arch = "wasm32", wasm_export)]
-pub fn observe(
-    _sender: AccountId,
-    seconds_agos_packed: u64,
-    timestamp: u32,
-) -> u64 {
-    with_storage!({
-        wasm_trace!("observe");
-        // Unpack up to 2 × u32 from the packed u64 (lower / upper 32 bits).
-        let sago0 = (seconds_agos_packed & 0xFFFF_FFFF) as u32;
-        let sago1 = (seconds_agos_packed >> 32) as u32;
-        let agos = if sago1 == 0 { &[sago0][..] } else { &[sago0, sago1][..] };
-
-        let (tick, liq) = with_state(|s| (s.pool.current_tick, s.pool.liquidity_active));
-
-        let result = with_state(|s| s.oracle.observe(timestamp, agos, tick, liq));
-        match result {
-            oracle::ObserveResult::Ok { tick_cumulatives, .. } => {
-                let tc0 = tick_cumulatives.get(0).copied().unwrap_or(0) as i32 as u64;
-                let tc1 = tick_cumulatives.get(1).copied().unwrap_or(0) as i32 as u64;
-                tc0 | (tc1 << 32)
-            }
-            oracle::ObserveResult::Err => 0,
-        }
-    })
-}
-
-/// @xrpl-function increase_observation_cardinality
-/// @param next UINT16 - New target cardinality (number of observations to keep)
-/// @return UINT32 - 0 on success
-#[cfg_attr(target_arch = "wasm32", wasm_export)]
-pub fn increase_observation_cardinality(
-    _sender: AccountId,
-    next: u16,
-) -> u32 {
-    with_storage!({
-        wasm_trace!("increase_observation_cardinality");
-        with_state(|s| s.oracle.grow(next));
-        0
-    })
-}
-
 /// @xrpl-function collect_protocol
 /// @param max_amount_0 UINT64 - Max token0 protocol fees to collect
 /// @param max_amount_1 UINT64 - Max token1 protocol fees to collect
+/// @param _pad0 UINT64 - Reserved (must be 0)
+/// @param _pad1 UINT64 - Reserved (must be 0)
 /// @return UINT64 - Packed (collected_0: u32 << 32 | collected_1: u32) or 0 on error
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn collect_protocol(
     sender: AccountId,
     max_amount_0: u64,
     max_amount_1: u64,
+    _pad0: u64,
+    _pad1: u64,
 ) -> u64 {
     with_storage!({
         wasm_trace!("collect_protocol");
@@ -662,9 +592,12 @@ pub fn collect_protocol(
 
 /// @xrpl-function set_protocol_fee
 /// @param protocol_fee_share_bps UINT16 - Protocol fee share (max 2500 = 25%)
+/// @param _pad0 UINT64 - Reserved (must be 0)
+/// @param _pad1 UINT64 - Reserved (must be 0)
+/// @param _pad2 UINT32 - Reserved (must be 0)
 /// @return UINT32 - 0 on success
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
-pub fn set_protocol_fee(sender: AccountId, protocol_fee_share_bps: u16) -> u32 {
+pub fn set_protocol_fee(sender: AccountId, protocol_fee_share_bps: u16, _pad0: u64, _pad1: u64, _pad2: u32) -> u32 {
     with_storage!({
         wasm_trace!("set_protocol_fee");
         match require_owner(sender) {
@@ -681,15 +614,45 @@ pub fn set_protocol_fee(sender: AccountId, protocol_fee_share_bps: u16) -> u32 {
 
 /// @xrpl-function set_pause
 /// @param paused UINT8 - 1 = pause, 0 = unpause
+/// @param _pad0 UINT64 - Reserved (must be 0)
+/// @param _pad1 UINT64 - Reserved (must be 0)
+/// @param _pad2 UINT32 - Reserved (must be 0)
 /// @return UINT32 - 0 on success
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
-pub fn set_pause(sender: AccountId, paused: u8) -> u32 {
+pub fn set_pause(sender: AccountId, paused: u8, _pad0: u64, _pad1: u64, _pad2: u32) -> u32 {
     with_storage!({
         wasm_trace!("set_pause");
         match require_owner(sender) {
             Err(e) => e.code(),
             Ok(_) => {
                 with_state(|s| s.config.paused = paused != 0);
+                0
+            }
+        }
+    })
+}
+
+/// @xrpl-function set_manager
+/// @param mgr_lo UINT64 - Bytes 0-7 of the manager account address (little-endian)
+/// @param mgr_mid UINT64 - Bytes 8-15 of the manager account address (little-endian)
+/// @param mgr_hi UINT32 - Bytes 16-19 of the manager account address (little-endian)
+/// @param _pad UINT32 - Reserved (must be 0)
+/// @return UINT32 - 0 on success
+///
+/// May only be called by the current owner.
+/// Once the manager is set, admin functions accept calls from both owner and manager.
+#[cfg_attr(target_arch = "wasm32", wasm_export)]
+pub fn set_manager(sender: AccountId, mgr_lo: u64, mgr_mid: u64, mgr_hi: u32, _pad: u32) -> u32 {
+    with_storage!({
+        wasm_trace!("set_manager");
+        match require_owner(sender) {
+            Err(e) => e.code(),
+            Ok(_) => {
+                let mut manager = [0u8; 20];
+                manager[0..8].copy_from_slice(&mgr_lo.to_le_bytes());
+                manager[8..16].copy_from_slice(&mgr_mid.to_le_bytes());
+                manager[16..20].copy_from_slice(&mgr_hi.to_le_bytes());
+                with_state(|s| s.config.manager = manager);
                 0
             }
         }
@@ -705,6 +668,16 @@ pub fn test_setup(owner: AccountId, tick_spacing: i32) {
     with_state(|s| {
         *s = ContractState::new();
         s.config.owner = owner;
+        s.config.tick_spacing = tick_spacing;
+    });
+}
+
+/// Reset state with an explicit manager address (used by manager contract tests).
+pub fn test_setup_with_manager(owner: AccountId, manager: AccountId, tick_spacing: i32) {
+    with_state(|s| {
+        *s = ContractState::new();
+        s.config.owner = owner;
+        s.config.manager = manager;
         s.config.tick_spacing = tick_spacing;
     });
 }
@@ -725,6 +698,10 @@ pub fn get_current_tick() -> i32 {
     with_state(|s| s.pool.current_tick)
 }
 
+pub fn get_manager() -> AccountId {
+    with_state(|s| s.config.manager)
+}
+
 pub fn get_fee_growth_global() -> (u128, u128) {
     with_state(|s| (s.pool.fee_growth_global_0_q128, s.pool.fee_growth_global_1_q128))
 }
@@ -742,13 +719,14 @@ mod tests {
 
     fn init_pool() {
         test_setup(owner(), 10);
-        assert_eq!(initialize_pool(owner(), Q64, 30, 0, 1_000_000), 0);
+        // Q64 = 2^64: lo = 0, hi = 1
+        assert_eq!(initialize_pool(owner(), 0u64, 1u64, 30, 0), 0);
     }
 
     fn tick(t: i32) -> u32 { t as u32 }
 
     fn add_liquidity() {
-        assert_eq!(mint(alice(), tick(-1000), 1000, 1_000_000_000), 0);
+        assert_eq!(mint(alice(), tick(-1000), 1000, 1_000_000_000, 0), 0);
     }
 
     #[test]
@@ -759,7 +737,7 @@ mod tests {
         let liq_before = get_liquidity();
         assert!(liq_before > 0);
 
-        let out = swap_exact_in(alice(), 10_000, 9_900, 0, Q64 * 2, 1_000_100);
+        let out = swap_exact_in(alice(), 10_000, 9_900, 0, 0);
         assert!(out > 0, "swap should produce output");
         let sp_after = get_sqrt_price();
         assert!(sp_after > sp_before, "price should have increased");
@@ -770,7 +748,7 @@ mod tests {
         init_pool();
         add_liquidity();
         let sp_before = get_sqrt_price();
-        let out = swap_exact_in(alice(), 10_000, 9_900, 1, Q64 / 2, 1_000_100);
+        let out = swap_exact_in(alice(), 10_000, 9_900, 1, 0);
         assert!(out > 0);
         assert!(get_sqrt_price() < sp_before);
     }
@@ -788,7 +766,7 @@ mod tests {
         init_pool();
         add_liquidity();
         let liq = get_liquidity();
-        assert_eq!(burn(alice(), tick(-1000), 1000, 500_000_000), 0);
+        assert_eq!(burn(alice(), tick(-1000), 1000, 500_000_000, 0), 0);
         assert!(get_liquidity() < liq);
     }
 
@@ -796,7 +774,7 @@ mod tests {
     fn collect_works_after_burn() {
         init_pool();
         add_liquidity();
-        burn(alice(), tick(-1000), 1000, 1_000_000_000);
+        burn(alice(), tick(-1000), 1000, 1_000_000_000, 0);
         assert_eq!(collect(alice(), tick(-1000), 1000, u64::MAX, u64::MAX), 0);
     }
 
@@ -804,8 +782,8 @@ mod tests {
     fn pause_blocks_swap() {
         init_pool();
         add_liquidity();
-        assert_eq!(set_pause(owner(), 1), 0);
-        let out = swap_exact_in(alice(), 10_000, 0, 0, Q64 * 2, 1_000_100);
+        assert_eq!(set_pause(owner(), 1, 0, 0, 0), 0);
+        let out = swap_exact_in(alice(), 10_000, 0, 0, 0);
         assert_eq!(out, 0); // paused → returns 0
     }
 
@@ -813,16 +791,16 @@ mod tests {
     fn set_protocol_fee_and_collect() {
         init_pool();
         add_liquidity();
-        assert_eq!(set_protocol_fee(owner(), 1_000), 0); // 10% of fees
+        assert_eq!(set_protocol_fee(owner(), 1_000, 0, 0, 0), 0); // 10% of fees
 
         // Do a swap so fees accumulate.
-        swap_exact_in(alice(), 100_000, 99_000, 0, Q64 * 3, 2_000_000);
+        swap_exact_in(alice(), 100_000, 99_000, 0, 0);
 
         let (pf0, pf1) = get_protocol_fees();
         // At least one of them should be non-zero.
         assert!(pf0 > 0 || pf1 > 0, "protocol fees should have accrued");
 
-        let packed = collect_protocol(owner(), u64::MAX, u64::MAX);
+        let packed = collect_protocol(owner(), u64::MAX, u64::MAX, 0, 0);
         // After collection, protocol fees should be zero.
         let (pf0_after, pf1_after) = get_protocol_fees();
         assert_eq!(pf0_after, 0);
@@ -831,30 +809,9 @@ mod tests {
     }
 
     #[test]
-    fn oracle_observe_after_swap() {
-        init_pool();
-        add_liquidity();
-        // Grow the oracle buffer to hold more observations.
-        assert_eq!(increase_observation_cardinality(owner(), 10), 0);
-
-        // Swap at t=1_000_100.
-        swap_exact_in(alice(), 10_000, 9_900, 0, Q64 * 2, 1_000_100);
-
-        // Swap at t=1_000_200 (100 seconds later).
-        swap_exact_in(alice(), 10_000, 0, 0, Q64 * 3, 1_000_200);
-
-        // Observe at t=1_000_200, 0 seconds ago → should return tick_cumulative.
-        let packed = observe(alice(), 0u64, 1_000_200);
-        // It returns 0 before any oracle writes — but we've had writes, so
-        // it should be non-zero (tick_cumulative > 0 after upward swaps).
-        // Even 0 is acceptable for the very first block; we just verify no panic.
-        let _ = packed;
-    }
-
-    #[test]
     fn unauthorized_initialize_fails() {
         test_setup(owner(), 10);
-        let result = initialize_pool(alice(), Q64, 30, 0, 0);
+        let result = initialize_pool(alice(), 0u64, 1u64, 30, 0);
         assert_ne!(result, 0); // NotAuthorized
     }
 
@@ -865,7 +822,7 @@ mod tests {
         // min_amount_out = 0 bypasses the 1% cap (floor = 0.99 * amount_in).
         // Actually our check: floor = amount_in * 9900/10000 = 9900
         // min_amount_out = 0 < 9900 → SlippageLimitExceeded → returns 0.
-        let out = swap_exact_in(alice(), 10_000, 0, 0, Q64 * 2, 1_000_100);
+        let out = swap_exact_in(alice(), 10_000, 0, 0, 0);
         assert_eq!(out, 0);
     }
 }

@@ -91,12 +91,11 @@ impl<'a> ByteReader<'a> {
 // Per-struct encode / decode
 // ---------------------------------------------------------------------------
 
-use crate::oracle::Observation;
 use crate::position::PositionState;
 use crate::tick::TickState;
 use crate::tick_bitmap::Word256;
 
-// --- PoolState fields (125 bytes) ---
+// --- PoolState fields ---
 pub(crate) fn encode_pool(w: &mut ByteWriter, s: &super::PoolState) {
     w.u128(s.sqrt_price_q64_64);
     w.i32(s.current_tick);
@@ -108,8 +107,6 @@ pub(crate) fn encode_pool(w: &mut ByteWriter, s: &super::PoolState) {
     w.u128(s.protocol_fees_0);
     w.u128(s.protocol_fees_1);
     w.u8(s.initialized as u8);
-    w.u128(s.seconds_per_liquidity_q128);
-    w.u32(s.last_block_timestamp);
 }
 
 pub(crate) fn decode_pool(r: &mut ByteReader) -> Option<super::PoolState> {
@@ -124,14 +121,13 @@ pub(crate) fn decode_pool(r: &mut ByteReader) -> Option<super::PoolState> {
         protocol_fees_0: r.u128()?,
         protocol_fees_1: r.u128()?,
         initialized: r.u8()? != 0,
-        seconds_per_liquidity_q128: r.u128()?,
-        last_block_timestamp: r.u32()?,
     })
 }
 
-// --- ContractConfig (27 bytes) ---
+// --- ContractConfig (47 bytes: 20 owner + 20 manager + 1 paused + 2 slippage + 4 spacing) ---
 pub(crate) fn encode_config(w: &mut ByteWriter, c: &super::ContractConfig) {
     w.bytes20(&c.owner);
+    w.bytes20(&c.manager);
     w.u8(c.paused as u8);
     w.u16(c.max_slippage_bps);
     w.i32(c.tick_spacing);
@@ -140,48 +136,10 @@ pub(crate) fn encode_config(w: &mut ByteWriter, c: &super::ContractConfig) {
 pub(crate) fn decode_config(r: &mut ByteReader) -> Option<super::ContractConfig> {
     Some(super::ContractConfig {
         owner: r.bytes20()?,
+        manager: r.bytes20()?,
         paused: r.u8()? != 0,
         max_slippage_bps: r.u16()?,
         tick_spacing: r.i32()?,
-    })
-}
-
-// --- OracleBuffer header + observations ---
-pub(crate) fn encode_oracle(w: &mut ByteWriter, o: &crate::oracle::OracleBuffer) {
-    w.u16(o.index);
-    w.u16(o.cardinality);
-    w.u16(o.cardinality_next);
-    w.u32(o.data.len() as u32);
-    for obs in &o.data {
-        encode_observation(w, obs);
-    }
-}
-
-pub(crate) fn decode_oracle(r: &mut ByteReader) -> Option<crate::oracle::OracleBuffer> {
-    let index = r.u16()?;
-    let cardinality = r.u16()?;
-    let cardinality_next = r.u16()?;
-    let count = r.u32()? as usize;
-    let mut data = Vec::with_capacity(count);
-    for _ in 0..count {
-        data.push(decode_observation(r)?);
-    }
-    Some(crate::oracle::OracleBuffer { data, index, cardinality, cardinality_next })
-}
-
-fn encode_observation(w: &mut ByteWriter, o: &Observation) {
-    w.u32(o.timestamp);
-    w.i64(o.tick_cumulative);
-    w.u128(o.seconds_per_liquidity_q128);
-    w.u8(o.initialized as u8);
-}
-
-fn decode_observation(r: &mut ByteReader) -> Option<Observation> {
-    Some(Observation {
-        timestamp: r.u32()?,
-        tick_cumulative: r.i64()?,
-        seconds_per_liquidity_q128: r.u128()?,
-        initialized: r.u8()? != 0,
     })
 }
 
@@ -210,10 +168,10 @@ pub fn decode_tick_state(r: &mut ByteReader) -> Option<TickState> {
 
 // --- TickMap (4 + n * 100 bytes) ---
 pub(crate) fn encode_ticks(w: &mut ByteWriter, m: &crate::tick::TickMap) {
-    w.u32(m.0.len() as u32);
-    for (&k, v) in &m.0 {
-        w.i32(k);
-        encode_tick_state(w, v);
+    w.u32(m.len as u32);
+    for i in 0..m.len {
+        w.i32(m.keys[i]);
+        encode_tick_state(w, &m.vals[i]);
     }
 }
 
@@ -223,17 +181,17 @@ pub(crate) fn decode_ticks(r: &mut ByteReader) -> Option<crate::tick::TickMap> {
     for _ in 0..count {
         let k = r.i32()?;
         let v = decode_tick_state(r)?;
-        map.0.insert(k, v);
+        map.set(k, v);
     }
     Some(map)
 }
 
 // --- TickBitmap (4 + n * 34 bytes) ---
 pub(crate) fn encode_bitmap(w: &mut ByteWriter, b: &crate::tick_bitmap::TickBitmap) {
-    w.u32(b.words.len() as u32);
-    for (&k, v) in &b.words {
-        w.i16(k);
-        for limb in &v.0 {
+    w.u32(b.len as u32);
+    for i in 0..b.len {
+        w.i16(b.word_keys[i]);
+        for limb in &b.word_vals[i].0 {
             w.u64(*limb);
         }
     }
@@ -248,7 +206,13 @@ pub(crate) fn decode_bitmap(r: &mut ByteReader) -> Option<crate::tick_bitmap::Ti
         for limb in &mut limbs {
             *limb = r.u64()?;
         }
-        bm.words.insert(k, Word256(limbs));
+        let word = Word256(limbs);
+        if !word.is_empty() {
+            let i = bm.len;
+            bm.word_keys[i] = k;
+            bm.word_vals[i] = word;
+            bm.len += 1;
+        }
     }
     Some(bm)
 }
@@ -274,12 +238,12 @@ fn decode_pos_state(r: &mut ByteReader) -> Option<PositionState> {
 
 // --- PositionMap (4 + n * 108 bytes) ---
 pub(crate) fn encode_positions(w: &mut ByteWriter, m: &crate::position::PositionMap) {
-    w.u32(m.0.len() as u32);
-    for (k, v) in &m.0 {
-        w.bytes20(&k.owner);
-        w.i32(k.lower_tick);
-        w.i32(k.upper_tick);
-        encode_pos_state(w, v);
+    w.u32(m.len as u32);
+    for i in 0..m.len {
+        w.bytes20(&m.keys[i].owner);
+        w.i32(m.keys[i].lower_tick);
+        w.i32(m.keys[i].upper_tick);
+        encode_pos_state(w, &m.vals[i]);
     }
 }
 
@@ -293,7 +257,10 @@ pub(crate) fn decode_positions(r: &mut ByteReader) -> Option<crate::position::Po
             upper_tick: r.i32()?,
         };
         let val = decode_pos_state(r)?;
-        pm.0.insert(key, val);
+        let i = pm.len;
+        pm.keys[i] = key;
+        pm.vals[i] = val;
+        pm.len += 1;
     }
     Some(pm)
 }
@@ -306,7 +273,6 @@ pub(crate) fn encode_state(state: &super::ContractState) -> Vec<u8> {
     let mut w = ByteWriter::new();
     encode_pool(&mut w, &state.pool);
     encode_config(&mut w, &state.config);
-    encode_oracle(&mut w, &state.oracle);
     encode_ticks(&mut w, &state.ticks);
     encode_bitmap(&mut w, &state.bitmap);
     encode_positions(&mut w, &state.positions);
@@ -317,11 +283,10 @@ pub(crate) fn decode_state(data: &[u8]) -> Option<super::ContractState> {
     let mut r = ByteReader::new(data);
     let pool = decode_pool(&mut r)?;
     let config = decode_config(&mut r)?;
-    let oracle = decode_oracle(&mut r)?;
     let ticks = decode_ticks(&mut r)?;
     let bitmap = decode_bitmap(&mut r)?;
     let positions = decode_positions(&mut r)?;
-    Some(super::ContractState { pool, config, oracle, ticks, bitmap, positions })
+    Some(super::ContractState { pool, config, ticks, bitmap, positions })
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +326,7 @@ mod tests {
     fn roundtrip_with_ticks() {
         use crate::tick::TickState;
         let mut state = ContractState::new();
-        state.ticks.0.insert(100, TickState {
+        state.ticks.set(100, TickState {
             liquidity_gross: 999,
             liquidity_net: -999,
             fee_growth_outside_0_q128: 42,

@@ -1,0 +1,69 @@
+{
+  "contract_name": "my-contract2",
+  "functions": [
+    {
+      "name": "initialize_pool",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "mint",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "burn",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "collect",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "swap_exact_in",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "Amount out (0 on failure)"
+      }
+    },
+    {
+      "name": "set_protocol_fee",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "set_pause",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "set_manager",
+      "parameters": [],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    }
+  ]
+}

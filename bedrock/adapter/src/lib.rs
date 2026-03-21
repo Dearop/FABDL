@@ -44,8 +44,6 @@ pub struct SwapRequest {
     pub min_amount_out: u64,
     /// true = token0 → token1 (price down), false = reverse.
     pub zero_for_one: bool,
-    /// Hard price boundary in Q64.64.
-    pub sqrt_price_limit: u128,
 }
 
 #[derive(Debug, Clone)]
@@ -111,18 +109,12 @@ impl DualPathAdapter {
         // Pre-validation: enforce slippage cap before sending to chain.
         self.validate_slippage(req)?;
 
-        // Call the contract's swap_exact_in function via Bedrock transport.
-        // In production: serialize `req` into a Bedrock `call` transaction,
-        // broadcast it, and parse the receipt.
-        //
-        // For this MVP / test harness: delegate to the in-process contract.
         let amount_out = uniswap_v3_xrpl_contract::swap_exact_in(
             req.sender,
             req.amount_in,
             req.min_amount_out,
             if req.zero_for_one { 1 } else { 0 },
-            req.sqrt_price_limit,
-            0, // timestamp: 0 in adapter (not block-time aware)
+            0,
         );
 
         if amount_out == 0 && req.min_amount_out > 0 {
@@ -149,18 +141,12 @@ impl DualPathAdapter {
 
         self.validate_slippage(req)?;
 
-        // In production: construct AMMSwap / multi-step XRPL transactions,
-        // sign with caller's key (never held by this adapter), broadcast,
-        // and parse the ledger receipt.
-        //
-        // For this MVP: delegate to the in-process contract, same as Bedrock.
         let amount_out = uniswap_v3_xrpl_contract::swap_exact_in(
             req.sender,
             req.amount_in,
             req.min_amount_out,
             if req.zero_for_one { 1 } else { 0 },
-            req.sqrt_price_limit,
-            0, // timestamp: 0 in adapter (not block-time aware)
+            0,
         );
 
         if amount_out == 0 && req.min_amount_out > 0 {
@@ -205,16 +191,14 @@ impl DualPathAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use uniswap_v3_xrpl_contract::{test_setup, math::Q64};
+    use uniswap_v3_xrpl_contract::test_setup;
 
     fn owner() -> [u8; 20] { [7u8; 20] }
 
     fn setup_pool() {
         test_setup(owner(), 10);
-        // Initialize pool at price = 1.0 (sqrt_price = Q64).
-        uniswap_v3_xrpl_contract::initialize_pool(owner(), Q64, 30, 0, 0);
-        // Add liquidity so swaps produce output.
-        uniswap_v3_xrpl_contract::mint(owner(), (-1000_i32) as u32, 1000, 1_000_000_000);
+        uniswap_v3_xrpl_contract::initialize_pool(owner(), 0u64, 1u64, 30, 0);
+        uniswap_v3_xrpl_contract::mint(owner(), (-1000_i32) as u32, 1000, 1_000_000_000, 0);
     }
 
     fn req(amount_in: u64, zero_for_one: bool) -> SwapRequest {
@@ -223,7 +207,6 @@ mod tests {
             amount_in,
             min_amount_out: amount_in * 99 / 100,
             zero_for_one,
-            sqrt_price_limit: if zero_for_one { Q64 / 2 } else { Q64 * 2 },
         }
     }
 
@@ -258,9 +241,8 @@ mod tests {
         let bad_req = SwapRequest {
             sender: owner(),
             amount_in: 10_000,
-            min_amount_out: 1, // essentially no slippage protection → should fail our guard
+            min_amount_out: 1,
             zero_for_one: false,
-            sqrt_price_limit: Q64 * 2,
         };
         let err = adapter.execute_with_fallback(&bad_req).unwrap_err();
         assert!(matches!(err, AdapterError::ContractError(_)));
@@ -274,7 +256,6 @@ mod tests {
             amount_in: 0,
             min_amount_out: 0,
             zero_for_one: false,
-            sqrt_price_limit: Q64 * 2,
         }).unwrap_err();
         assert!(matches!(err, AdapterError::ContractError(_)));
     }
