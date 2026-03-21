@@ -39,29 +39,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setError(null)
 
     try {
-      if (!OtsuWallet.isInstalled()) {
-        throw new Error('Otsu Wallet extension not found. Please install it first.')
-      }
-
-      const otsu = new OtsuWallet()
-      const { address } = await otsu.connect({ scopes: ['read', 'sign', 'submit'] })
-
-      const networkInfo = await otsu.getNetwork()
-
-      // New accounts don't exist on-ledger until funded (XRPL base reserve = 10 XRP).
-      // getBalance() throws "Account not found" in that case — handle it gracefully.
-      let balance = '0 XRP (unfunded)'
-      try {
-        const balanceInfo = await otsu.getBalance()
-        balance = `${balanceInfo.available} XRP`
-      } catch {
-        // Account not yet funded — connection still valid
-      }
-
+      // TEST BRANCH: skip wallet extension entirely
       setWallet({
-        address,
-        balance,
-        network: networkInfo.networkId,
+        address: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
+        balance: '1000 XRP',
+        network: 'mainnet',
       })
       setStatus('ready')
     } catch (err) {
@@ -71,9 +53,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const disconnectWallet = useCallback(() => {
-    if (OtsuWallet.isInstalled()) {
-      new OtsuWallet().disconnect().catch(() => {})
-    }
+
     setWallet(null)
     setStatus('disconnected')
     setStrategies([])
