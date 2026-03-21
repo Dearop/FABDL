@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 import type { WalletInfo, AppStatus, Strategy } from './types'
-import { OtsuWallet } from './otsu-wallet'
 
 interface WalletContextType {
   wallet: WalletInfo | null
@@ -12,7 +11,7 @@ interface WalletContextType {
   txHash: string | null
   error: string | null
   lastQuery: string
-  connectWallet: () => Promise<void>
+  connectWallet: (address: string) => Promise<void>
   disconnectWallet: () => void
   setStatus: (status: AppStatus) => void
   setStrategies: (strategies: Strategy[]) => void
@@ -34,26 +33,25 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [lastQuery, setLastQuery] = useState('')
 
-  const connectWallet = useCallback(async () => {
+  const connectWallet = useCallback(async (address: string) => {
     setStatus('connecting')
     setError(null)
 
-    try {
-      // TEST BRANCH: skip wallet extension entirely
-      setWallet({
-        address: 'rHb9CJAWyB4rj91VRWn96DkukG4bwdtyTh',
-        balance: '1000 XRP',
-        network: 'mainnet',
-      })
-      setStatus('ready')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect wallet')
+    if (!address.startsWith('r') || address.length < 20) {
+      setError('Invalid XRPL address.')
       setStatus('disconnected')
+      return
     }
+
+    setWallet({
+      address,
+      balance: 'testnet',
+      network: process.env.NEXT_PUBLIC_XRPL_NETWORK || 'testnet',
+    })
+    setStatus('ready')
   }, [])
 
   const disconnectWallet = useCallback(() => {
-
     setWallet(null)
     setStatus('disconnected')
     setStrategies([])

@@ -18,7 +18,7 @@ async fn main() {
 
     // Configuration from environment (with sensible defaults for local dev).
     let xrpl_endpoint = std::env::var("XRPL_ENDPOINT")
-        .unwrap_or_else(|_| "https://xrplcluster.com".to_string());
+        .unwrap_or_else(|_| "https://s.altnet.rippletest.net:51234".to_string());
 
     let port: u16 = std::env::var("PORT")
         .ok()

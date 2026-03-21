@@ -1,16 +1,18 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useWallet } from '@/lib/wallet-context'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Spinner } from '@/components/ui/spinner'
-import { Wallet, Shield, Zap, ArrowRight, CheckCircle2, AlertCircle } from 'lucide-react'
+import { Wallet, Shield, Zap, CheckCircle2, AlertCircle } from 'lucide-react'
 
 export function WalletConnect() {
   const router = useRouter()
   const { wallet, status, error, connectWallet } = useWallet()
+  const [address, setAddress] = useState('')
 
   const isConnecting = status === 'connecting'
   const isConnected = wallet !== null
@@ -18,10 +20,9 @@ export function WalletConnect() {
   // Auto-redirect to trading dashboard after successful connection
   useEffect(() => {
     if (isConnected) {
-      console.log('[v0] Wallet connected, redirecting to /trading...')
       const timer = setTimeout(() => {
         router.push('/trading')
-      }, 1500) // Small delay to show success state
+      }, 1500)
       return () => clearTimeout(timer)
     }
   }, [isConnected, router])
@@ -50,17 +51,26 @@ export function WalletConnect() {
         {/* Connection card */}
         <Card className="border-border bg-card/50 backdrop-blur">
           <CardHeader className="text-center">
-            <CardTitle className="text-lg">Otsu Wallet</CardTitle>
+            <CardTitle className="text-lg">Enter Wallet Address</CardTitle>
             <CardDescription>
-              Secure connection to local XRPL testnet
+              Paste your XRPL testnet address to get started
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-6">
+          <CardContent className="space-y-4">
             {!isConnected ? (
               <>
-                <Button 
-                  onClick={connectWallet} 
+                <Input
+                  placeholder="rYourXRPLAddressHere..."
+                  value={address}
+                  onChange={e => setAddress(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !isConnecting && connectWallet(address)}
+                  className="font-mono text-sm"
                   disabled={isConnecting}
+                />
+
+                <Button
+                  onClick={() => connectWallet(address)}
+                  disabled={isConnecting || !address.trim()}
                   className="w-full h-12 text-base gap-2"
                   size="lg"
                 >
@@ -72,7 +82,7 @@ export function WalletConnect() {
                   ) : (
                     <>
                       <Wallet className="h-5 w-5" />
-                      Connect Otsu Wallet
+                      Connect Wallet
                     </>
                   )}
                 </Button>

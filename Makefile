@@ -103,7 +103,7 @@ start-intent:
 	@echo "$(BLUE)🔄 Starting Intent Router (gRPC)$(NC)"
 	@echo "$(BLUE)Port: 50051$(NC)"
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
-	cd llm-orchestration && python3 src/intent_router_service.py
+	cd llm-orchestration && python3 src/intent_router_service.py --model llama3.2:3b
 
 start-backend:
 	@echo "$(BLUE)━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━$(NC)"
@@ -176,11 +176,11 @@ logs:
 	@echo ""
 	@echo "$(GREEN)Terminal 2 - Intent Router:$(NC)"
 	@echo "  INFO:__main__:Intent Router listening on [::]:50051"
-	@echo "  INFO:__main__:Using model: llama2"
+	@echo "  INFO:__main__:Using model: llama3.2:3b"
 	@echo "  INFO:__main__:LLM available: True"
 	@echo ""
 	@echo "$(GREEN)Terminal 3 - Rust Analysis Backend:$(NC)"
-	@echo "  INFO fin_analysis_backend: starting fin-analysis-backend endpoint=https://xrplcluster.com port=3001"
+	@echo "  INFO fin_analysis_backend: starting fin-analysis-backend endpoint=https://s.altnet.rippletest.net:51234 port=3001"
 	@echo "  INFO fin_analysis_backend: listening on 0.0.0.0:3001"
 	@echo ""
 	@echo "$(GREEN)Terminal 4 - Backend:$(NC)"

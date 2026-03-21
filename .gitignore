@@ -6,16 +6,16 @@ frontend/dist/
 frontend/.env.local
 frontend/.env.*.local
 
-# Backend (Python)
-backend/__pycache__/
-backend/*.pyc
-backend/*.pyo
-backend/venv/
-backend/env/
-backend/.env
-backend/.env.local
-backend/*.egg-info/
-backend/.pytest_cache/
+# Python (all locations)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/venv/
+**/env/
+**/.env
+**/.env.local
+**/*.egg-info/
+**/.pytest_cache/
 
 # LLM Orchestration
 llm-orchestration/__pycache__/

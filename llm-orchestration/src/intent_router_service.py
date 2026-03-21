@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 class IntentRouterServicer(intent_router_pb2_grpc.IntentRouterServicer):
     """gRPC service for local LLM-based intent classification"""
     
-    def __init__(self, model: str = "llama2", use_ollama: bool = True):
+    def __init__(self, model: str = "llama3.2:3b", use_ollama: bool = True):
         """
         Initialize the intent router with a local LLM.
         
@@ -259,7 +259,7 @@ REMEMBER: RESPOND ONLY WITH JSON. NO WORDS BEFORE OR AFTER."""
         return response
 
 
-def serve(host: str = "[::]:50051", model: str = "llama2"):
+def serve(host: str = "[::]:50051", model: str = "llama3.2:3b"):
     """
     Start gRPC server.
     
@@ -292,8 +292,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Intent Router gRPC Server")
     parser.add_argument(
         "--model",
-        default="llama2",
-        help="LLM model to use (default: llama2)"
+        default="llama3.2:3b",
+        help="LLM model to use (default: llama3.2:3b)"
     )
     parser.add_argument(
         "--host",
