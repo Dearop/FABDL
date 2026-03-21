@@ -69,6 +69,7 @@ State transitions in XRPL-in-Time fall into three categories. Only Category A an
 - `mint` — add concentrated liquidity to a tick range
 - `burn` — remove liquidity from a position
 - `collect` — claim accrued fees from a position
+- `donate` — inject token amounts directly into in-range LP fee accumulators (claimable via `collect`; silent no-op if no active liquidity)
 
 **Category B — User Borrow/Lend Operations (extended scope)**
 - `deposit_collateral` — lock XRP or RLUSD as collateral
@@ -137,7 +138,8 @@ sqrt_price_q64_64 = floor( sqrt(reserve_1 / reserve_0) * 2^64 )
 Call `initialize_pool` per pool with:
 - `sqrt_price`: derived above
 - `fee_bps`: match the live XRPL AMM fee at snapshot time (default 30 = 0.30%)
-- `protocol_fee_bps`: 0 for simulation sessions; configurable for production
+- `protocol_fee_share_bps`: 0 for simulation sessions; configurable for production
+- `hook_id`: `0` (NoopHook) for simulation; set to `1` (ConservativeHedge) or `2` (YieldRebalance) for strategy-specific pools
 
 Seed initial liquidity as a full-range position (`tickLower = -887272`, `tickUpper = 887272`) using snapshot reserves. Then seed LP state for the top 10 holders per pool.
 
@@ -203,7 +205,8 @@ Admin operations MUST be separated into a discrete `AdminInterface` that:
 |---|---|---|
 | `protocol_fee_share_bps` | `set_protocol_fee` | Fee drain from LPs |
 | `paused` | `set_pause` | Denial of service |
-| `max_slippage_bps` | `ContractConfig` (init only) | Forced high slippage |
+| `max_slippage_bps` | `ContractConfig` (init only, default 100 bps) | Forced high slippage |
+| `hook_id` | `initialize_pool` (init only) | Strategy rules silently bypassed or arbitrarily restricted |
 
 ### 5.4 Proposed Separation
 
