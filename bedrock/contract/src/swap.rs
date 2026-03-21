@@ -245,7 +245,8 @@ pub fn execute_swap(
 
 /// Compute fee growth per unit of liquidity in Q128 format.
 /// = (fee_amount << 128) / liquidity,  saturating.
-fn fee_growth_per_unit_q128(fee_amount: u128, liquidity: u128) -> u128 {
+/// Exposed as pub(crate) so `donate` in lib.rs can reuse the same formula.
+pub(crate) fn fee_growth_per_unit_q128(fee_amount: u128, liquidity: u128) -> u128 {
     if liquidity == 0 {
         return 0;
     }

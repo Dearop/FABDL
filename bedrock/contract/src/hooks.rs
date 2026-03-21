@@ -36,11 +36,33 @@ pub struct SwapOutcome {
     pub ticks_crossed: u32,
 }
 
+/// Amounts being donated directly to in-range LPs (passed to before/after_donate).
+#[derive(Clone, Copy)]
+pub struct DonateContext {
+    pub amount0: u64,
+    pub amount1: u64,
+}
+
 // ---------------------------------------------------------------------------
 // Hook trait — all methods default to no-ops
 // ---------------------------------------------------------------------------
 
 pub trait Hook: Sync {
+    /// Called before `initialize_pool` mutates any state.
+    /// `sqrt_price` and `fee_bps` are the values passed to the initializer.
+    fn before_initialize(
+        &self,
+        _sqrt_price: u128,
+        _fee_bps: u16,
+    ) -> Result<(), ContractError> {
+        Ok(())
+    }
+
+    /// Called after `initialize_pool` has written all state.
+    fn after_initialize(&self, _ctx: &HookContext) -> Result<(), ContractError> {
+        Ok(())
+    }
+
     fn before_swap(
         &self,
         _ctx: &HookContext,
@@ -94,6 +116,24 @@ pub trait Hook: Sync {
         _lower: i32,
         _upper: i32,
         _liquidity_delta: u128,
+    ) -> Result<(), ContractError> {
+        Ok(())
+    }
+
+    /// Called before fee-growth globals are updated by a `donate` call.
+    fn before_donate(
+        &self,
+        _ctx: &HookContext,
+        _donate: &DonateContext,
+    ) -> Result<(), ContractError> {
+        Ok(())
+    }
+
+    /// Called after fee-growth globals have been updated by a `donate` call.
+    fn after_donate(
+        &self,
+        _ctx: &HookContext,
+        _donate: &DonateContext,
     ) -> Result<(), ContractError> {
         Ok(())
     }
@@ -157,6 +197,10 @@ impl Hook for NoopHook {}
 
 /// Conservative hedge hook.
 ///
+/// - `before_initialize`: require `fee_bps >= 10` (0.1% minimum fee).
+///   Pools with near-zero fees don't compensate LPs for IL risk, making
+///   the conservative strategy pointless.
+///
 /// - `before_swap`: block swaps where `amount_in > 5%` of active liquidity.
 ///   Outsized swaps cause disproportionate IL for LP positions; this cap
 ///   keeps individual trade impact manageable.
@@ -167,6 +211,14 @@ impl Hook for NoopHook {}
 ///   width that remains active across typical daily volatility.
 struct ConservativeHedgeHook;
 impl Hook for ConservativeHedgeHook {
+    fn before_initialize(&self, _sqrt_price: u128, fee_bps: u16) -> Result<(), ContractError> {
+        // Require at least 0.1% fee — below this, IL will always outpace fee income.
+        if fee_bps < 10 {
+            return Err(ContractError::InvalidLiquidityDelta);
+        }
+        Ok(())
+    }
+
     fn before_swap(
         &self,
         ctx: &HookContext,
@@ -312,5 +364,50 @@ mod tests {
             assert_eq!(HookId::from_u8(id.to_u8()), id);
         }
         assert_eq!(HookId::from_u8(255), HookId::None); // unknown → None
+    }
+
+    // --- before/after_initialize ---
+
+    #[test]
+    fn noop_allows_any_initialize() {
+        let h = get(HookId::None);
+        assert!(h.before_initialize(Q64, 0).is_ok());   // zero fee
+        assert!(h.before_initialize(Q64, 1).is_ok());
+        assert!(h.after_initialize(&ctx_with(0, 0)).is_ok());
+    }
+
+    #[test]
+    fn conservative_blocks_low_fee_pool() {
+        let h = get(HookId::ConservativeHedge);
+        assert!(h.before_initialize(Q64, 9).is_err());  // 9 bps < 10 minimum
+        assert!(h.before_initialize(Q64, 10).is_ok()); // exactly 10 — allowed
+        assert!(h.before_initialize(Q64, 30).is_ok()); // standard 0.3% — fine
+    }
+
+    #[test]
+    fn yield_allows_any_initialize() {
+        let h = get(HookId::YieldRebalance);
+        assert!(h.before_initialize(Q64, 0).is_ok());
+        assert!(h.after_initialize(&ctx_with(0, 0)).is_ok());
+    }
+
+    // --- before/after_donate ---
+
+    #[test]
+    fn noop_allows_donate() {
+        let h = get(HookId::None);
+        let donate = DonateContext { amount0: 1000, amount1: 500 };
+        assert!(h.before_donate(&ctx_with(0, 1_000_000), &donate).is_ok());
+        assert!(h.after_donate(&ctx_with(0, 1_000_000), &donate).is_ok());
+    }
+
+    #[test]
+    fn all_hooks_allow_donate_by_default() {
+        let donate = DonateContext { amount0: 100, amount1: 100 };
+        for &id in &[HookId::None, HookId::ConservativeHedge, HookId::YieldRebalance] {
+            let h = get(id);
+            assert!(h.before_donate(&ctx_with(0, 1_000_000), &donate).is_ok());
+            assert!(h.after_donate(&ctx_with(0, 1_000_000), &donate).is_ok());
+        }
     }
 }

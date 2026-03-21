@@ -3,19 +3,7 @@
   "target_pool_count": 25,
   "top_lp_holders_per_pool": 10,
   "replay_window_secs": 3600,
-  "strict_pool_count": false,
-  "pool_selection_mode": "configured",
-  "pools": [
-    {
-      "name": "XRP-RLUSD",
-      "asset_0": {
-        "kind": "xrp"
-      },
-      "asset_1": {
-        "kind": "issued",
-        "currency": "RLUSD",
-        "issuer": "REPLACE_WITH_RLUSD_ISSUER"
-      }
-    }
-  ]
+  "strict_pool_count": true,
+  "pool_selection_mode": "discover",
+  "pools": []
 }

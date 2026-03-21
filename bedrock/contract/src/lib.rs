@@ -35,7 +35,7 @@ pub mod tick;
 pub mod tick_bitmap;
 pub mod types;
 
-use hooks::{HookContext, HookId, SwapOutcome};
+use hooks::{DonateContext, HookContext, HookId, SwapOutcome};
 use math::{amount0_delta, amount1_delta, sqrt_price_at_tick};
 pub use math::Q64;
 use oracle::OracleBuffer;
@@ -281,17 +281,41 @@ pub fn initialize_pool(
             Err(e) => return e.code(),
             Ok(_) => {}
         }
+
+        // Fire before_initialize with the incoming parameters before any state
+        // is written (hook can reject the pool configuration).
+        let resolved_hook = HookId::from_u8(hook_id);
+        let hook = hooks::get(resolved_hook);
+        let fee_clamped = fee_bps.min(10_000);
+        match hook.before_initialize(sqrt_price_q64_64.max(1u128 << 32), fee_clamped) {
+            Err(e) => return e.code(),
+            Ok(_) => {}
+        }
+
         let price = sqrt_price_q64_64.max(1u128 << 32);
         with_state(|s| {
             s.pool.sqrt_price_q64_64 = price;
             s.pool.current_tick = math::tick_at_sqrt_price(price);
-            s.pool.fee_bps = fee_bps.min(10_000);
+            s.pool.fee_bps = fee_clamped;
             s.pool.protocol_fee_share_bps = protocol_fee_share_bps.min(2_500);
             s.pool.last_block_timestamp = timestamp;
             s.pool.initialized = true;
-            s.config.hook_id = HookId::from_u8(hook_id);
+            s.config.hook_id = resolved_hook;
             s.oracle.initialize(timestamp);
         });
+
+        // Fire after_initialize with the fully written pool state.
+        let ctx = with_state(|s| HookContext {
+            current_tick: s.pool.current_tick,
+            sqrt_price: s.pool.sqrt_price_q64_64,
+            liquidity: s.pool.liquidity_active,
+            fee_bps: s.pool.fee_bps,
+        });
+        match hook.after_initialize(&ctx) {
+            Err(e) => return e.code(),
+            Ok(_) => {}
+        }
+
         0
     })
 }
@@ -713,6 +737,72 @@ pub fn collect_protocol(
     })
 }
 
+/// @xrpl-function donate
+/// @param amount0 UINT64 - Token0 amount to distribute to in-range LPs
+/// @param amount1 UINT64 - Token1 amount to distribute to in-range LPs
+/// @return UINT32 - 0 on success, error code otherwise
+///
+/// Donate tokens directly to active liquidity providers by injecting them
+/// into the global fee-growth accumulators. The donated amounts are then
+/// claimable via the normal `collect` path, proportional to each LP's share
+/// of active liquidity. If `liquidity_active == 0` the call succeeds but has
+/// no effect (the donated amounts are effectively lost — callers should check
+/// `get_liquidity()` first).
+#[cfg_attr(target_arch = "wasm32", wasm_export)]
+pub fn donate(
+    _sender: AccountId,
+    amount0: u64,
+    amount1: u64,
+) -> u32 {
+    with_storage!({
+        wasm_trace!("donate");
+        match donate_inner(amount0, amount1) {
+            Ok(_) => 0,
+            Err(e) => e.code(),
+        }
+    })
+}
+
+fn donate_inner(amount0: u64, amount1: u64) -> Result<(), ContractError> {
+    require_not_paused()?;
+    require_initialized()?;
+
+    if amount0 == 0 && amount1 == 0 {
+        return Err(ContractError::InvalidLiquidityDelta);
+    }
+
+    let hook_id = with_state(|s| s.config.hook_id);
+    let ctx = with_state(|s| HookContext {
+        current_tick: s.pool.current_tick,
+        sqrt_price: s.pool.sqrt_price_q64_64,
+        liquidity: s.pool.liquidity_active,
+        fee_bps: s.pool.fee_bps,
+    });
+    let donate_ctx = DonateContext { amount0, amount1 };
+
+    hooks::get(hook_id).before_donate(&ctx, &donate_ctx)?;
+
+    with_state(|s| {
+        let liq = s.pool.liquidity_active;
+        if liq > 0 {
+            if amount0 > 0 {
+                let delta = swap::fee_growth_per_unit_q128(amount0 as u128, liq);
+                s.pool.fee_growth_global_0_q128 =
+                    s.pool.fee_growth_global_0_q128.wrapping_add(delta);
+            }
+            if amount1 > 0 {
+                let delta = swap::fee_growth_per_unit_q128(amount1 as u128, liq);
+                s.pool.fee_growth_global_1_q128 =
+                    s.pool.fee_growth_global_1_q128.wrapping_add(delta);
+            }
+        }
+    });
+
+    hooks::get(hook_id).after_donate(&ctx, &donate_ctx)?;
+
+    Ok(())
+}
+
 /// @xrpl-function set_protocol_fee
 /// @param protocol_fee_share_bps UINT16 - Protocol fee share (max 2500 = 25%)
 /// @return UINT32 - 0 on success
@@ -899,6 +989,55 @@ mod tests {
         test_setup(owner(), 10);
         let result = initialize_pool(alice(), Q64, 30, 0, 0, 0);
         assert_ne!(result, 0); // NotAuthorized
+    }
+
+    #[test]
+    fn conservative_hook_blocks_low_fee_initialize() {
+        test_setup(owner(), 10);
+        // hook_id=1 (ConservativeHedge) requires fee_bps >= 10.
+        let result = initialize_pool(owner(), Q64, 5, 0, 0, 1);
+        assert_ne!(result, 0); // before_initialize rejected fee_bps=5
+    }
+
+    #[test]
+    fn conservative_hook_allows_sufficient_fee_initialize() {
+        test_setup(owner(), 10);
+        let result = initialize_pool(owner(), Q64, 30, 0, 0, 1);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn donate_increases_fee_growth() {
+        init_pool();
+        add_liquidity();
+        let out_before = swap_exact_in(alice(), 0, 0, 0, Q64 * 2, 1_000_100);
+        // Donate token0 to in-range LPs.
+        let _ = out_before;
+        // Capture fee_growth before donate.
+        let fg0_before = with_state(|s| s.pool.fee_growth_global_0_q128);
+        assert_eq!(donate(alice(), 10_000, 0), 0);
+        let fg0_after = with_state(|s| s.pool.fee_growth_global_0_q128);
+        assert!(fg0_after > fg0_before, "fee_growth_global_0 should increase after donate");
+    }
+
+    #[test]
+    fn donate_zero_amounts_errors() {
+        init_pool();
+        add_liquidity();
+        assert_ne!(donate(alice(), 0, 0), 0);
+    }
+
+    #[test]
+    fn donate_with_no_liquidity_succeeds_silently() {
+        init_pool(); // no mint — liquidity_active = 0
+        // Should succeed (no error), but fee growth stays zero.
+        assert_eq!(donate(alice(), 1_000, 1_000), 0);
+        let (fg0, fg1) = (
+            with_state(|s| s.pool.fee_growth_global_0_q128),
+            with_state(|s| s.pool.fee_growth_global_1_q128),
+        );
+        assert_eq!(fg0, 0);
+        assert_eq!(fg1, 0);
     }
 
     #[test]

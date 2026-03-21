@@ -20,7 +20,7 @@ The codebase is split into two Rust crates:
 | `uniswap-v3-xrpl-contract` | `bedrock/contract/` | The on-chain AMM logic |
 | `uniswap-v3-xrpl-adapter` | `bedrock/adapter/` | Off-chain routing shim |
 
-All 54 tests pass. The contract builds to a 375-byte WASM binary.
+All 64 tests pass. The contract builds to a 375-byte WASM binary.
 
 ---
 
@@ -125,6 +125,16 @@ Execute a swap for an exact input amount. Returns `amount_out` (0 on failure).
 - `min_amount_out`: output floor; returns 0 if not met
 - Also enforces the global `max_slippage_bps` cap
 - Fires `before_swap` / `after_swap` hooks
+
+### `donate`
+```
+donate(sender, amount0, amount1) -> u32
+```
+Distribute `amount0` and `amount1` directly to in-range LPs by injecting
+them into the global fee-growth accumulators. The amounts are claimable via
+the normal `collect` path, proportional to each LP's share of active
+liquidity. If `liquidity_active == 0` the call succeeds silently with no
+effect. Fires `before_donate` / `after_donate` hooks.
 
 ### `observe`
 ```
@@ -249,17 +259,24 @@ cross-contract calls.
 
 ```rust
 pub trait Hook: Sync {
+    // Pool lifecycle (10 points — matches Uniswap v4)
+    fn before_initialize(&self, sqrt_price: u128, fee_bps: u16) -> Result<(), ContractError>;
+    fn after_initialize(&self,  ctx: &HookContext)               -> Result<(), ContractError>;
     fn before_swap(&self, ctx: &HookContext, zero_for_one: bool, amount_in: u64)
         -> Result<(), ContractError>;
-    fn after_swap(&self, ctx: &HookContext, outcome: &SwapOutcome)
+    fn after_swap(&self,  ctx: &HookContext, outcome: &SwapOutcome)
         -> Result<(), ContractError>;
     fn before_mint(&self, ctx: &HookContext, lower: i32, upper: i32, delta: u128)
         -> Result<(), ContractError>;
-    fn after_mint(&self, ctx: &HookContext, lower: i32, upper: i32, delta: u128)
+    fn after_mint(&self,  ctx: &HookContext, lower: i32, upper: i32, delta: u128)
         -> Result<(), ContractError>;
     fn before_burn(&self, ctx: &HookContext, lower: i32, upper: i32, delta: u128)
         -> Result<(), ContractError>;
-    fn after_burn(&self, ctx: &HookContext, lower: i32, upper: i32, delta: u128)
+    fn after_burn(&self,  ctx: &HookContext, lower: i32, upper: i32, delta: u128)
+        -> Result<(), ContractError>;
+    fn before_donate(&self, ctx: &HookContext, donate: &DonateContext)
+        -> Result<(), ContractError>;
+    fn after_donate(&self,  ctx: &HookContext, donate: &DonateContext)
         -> Result<(), ContractError>;
 }
 ```
@@ -290,6 +307,9 @@ pub struct HookContext {
 | `YieldRebalance` | `2` | See below |
 
 **`ConservativeHedge`**
+- `before_initialize`: rejects pools with `fee_bps < 10` (< 0.1%). Below this
+  threshold fee income cannot compensate for IL, making the hedge strategy
+  pointless.
 - `before_swap`: rejects any swap where `amount_in > 5%` of `liquidity_active`.
   Prevents outsized single trades from causing disproportionate IL.
 - `before_mint`: rejects positions narrower than 200 ticks. Ensures positions
@@ -402,33 +422,39 @@ without a global length prefix.
 | TWAP oracle ring buffer | Full implementation | ✅ Complete |
 | Protocol fee governance | Full implementation | ✅ Complete |
 | Pause / emergency stop | Full implementation | ✅ Complete |
-| before/after swap hooks | Internal implementation | ⚠️ Partial (internal only) |
-| before/after add liquidity | Internal implementation | ⚠️ Partial (internal only) |
-| before/after remove liquidity | Internal implementation | ⚠️ Partial (internal only) |
-| before/after initialize hooks | Not implemented | ❌ Missing |
-| before/after donate hooks | Not implemented | ❌ Missing |
+| before/after initialize hooks | Internal implementation | ✅ Complete |
+| before/after swap hooks | Internal implementation | ✅ Complete |
+| before/after add liquidity hooks | Internal implementation | ✅ Complete |
+| before/after remove liquidity hooks | Internal implementation | ✅ Complete |
+| before/after donate hooks | Internal implementation | ✅ Complete |
+| `donate` to in-range LPs | Full implementation | ✅ Complete |
+| Multi-token accounting | XLS-33 MPTs (XRPL-native) | ✅ Available on-ledger (see below) |
+| Native gas token handling | Not applicable | — XRPL uses XRP natively |
 | Hook as external contract | Impossible | 🚫 See below |
 | Hook address encodes active flags | Impossible | 🚫 See below |
 | Dynamic fees (hook overrides fee) | Impossible | 🚫 See below |
 | Singleton PoolManager (all pools) | Impossible | 🚫 See below |
 | Flash accounting / delta settlement | Impossible | 🚫 See below |
 | Transient storage (EIP-1153) | Impossible | 🚫 See below |
-| ERC-6909 multi-token claims | Impossible | 🚫 See below |
 | `unlock` / callback settlement pattern | Impossible | 🚫 See below |
-| `donate` to in-range LPs | Not implemented | ❌ Missing (but buildable) |
-| Native ETH / gas token handling | Not applicable | — XRPL uses XRP natively |
 
-**Summary**: we have all of Uniswap v3, partial v4 hooks (internal only), and
-none of v4's core architectural changes. The gap is not a matter of missing
-code — it is a matter of the execution environment lacking the primitives v4
-was designed around.
+**Summary**: we have all of Uniswap v3, the complete v4 hook lifecycle
+(all 10 points: before/after initialize, swap, add liquidity, remove
+liquidity, donate), the `donate` function, and the XRPL-native multi-token
+standard (XLS-33 MPTs) as an analog to ERC-6909. The remaining gap is
+architectural, not a matter of missing code: the hooks are internal rather
+than externally deployable contracts, and the execution environment lacks
+the EVM primitives that v4's composability model depends on.
 
 ---
 
 ### Why Full v4 Is Impossible Here
 
 Uniswap v4 is not an extension of v3. It is a ground-up redesign built on
-four EVM-specific primitives that do not exist on XRPL or Bedrock.
+EVM-specific primitives that do not exist on XRPL or Bedrock. Three of the
+original five blockers remain absolute; one (multi-token accounting) is
+resolved by an XRPL amendment now live on mainnet; one (dynamic fees) is
+partially possible but requires cross-contract calls to be genuinely useful.
 
 #### 1. External Hooks Require Cross-Contract Calls
 
@@ -516,37 +542,71 @@ Even if Bedrock supported cross-contract calls, the flash accounting state
 would need to span multiple contracts, which requires transient storage to be
 safe — collapsing back to blocker 3.
 
-#### 5. ERC-6909 Multi-Token Claims
+#### 5. Multi-Token Accounting — Resolved by XLS-33 MPTs
 
 v4 uses ERC-6909 (a single contract holding balances for many token types)
 for internal position and fee accounting. This lets the PoolManager act as
-both AMM and token ledger, which removes the need for individual ERC-20
-transfers on every operation.
+both AMM and token ledger, removing the need for individual ERC-20 transfers
+on every operation.
 
-XRPL has its own multi-token model: native XRP, issued currencies (IOU), and
-AMM LP tokens. These are first-class ledger objects, not EVM contracts. There
-is no concept of a contract holding claims on behalf of users the way ERC-6909
-works. Implementing ERC-6909 semantics on XRPL would require off-ledger
-accounting that the ledger itself cannot enforce, undermining the trust model.
+**This blocker is resolved on XRPL.** XLS-33 Multi-Purpose Tokens
+(MPTs) were ratified and activated on XRPL mainnet on 1 October 2025.
+MPTs are first-class ledger objects that provide:
+
+- Fixed-point 64-bit balances (no floating-point edge cases)
+- 52 bytes per holder object vs 234 bytes for trust lines (~4× more compact)
+- Configurable flags: transferability, clawback, allow-listing, escrow
+- `MPTokenIssuanceCreate` / `MPTokenAuthorize` / `MPTokenIssuanceSet`
+  transactions natively supported by the ledger
+- Usable in Payment transactions alongside XRP and issued currencies
+
+The important differences from ERC-6909:
+
+| Property | ERC-6909 | XLS-33 MPTs |
+|---|---|---|
+| Where balances live | Inside the EVM contract | Ledger objects in owner directories |
+| Who enforces rules | The contract's Solidity code | The XRPL consensus rules |
+| Composability | Any contract can mint/transfer | Only the issuing account |
+| Balance range | Up to 2^256 | Up to 2^63 - 1 |
+| Rippling / netting | No | No (unlike trust lines) |
+
+For this project, LP position tokens and collected fees could be represented
+as MPTs, giving holders a portable, ledger-enforced claim rather than a
+balance that only exists inside the WASM contract's state blob. This removes
+the ERC-6909 argument as a v4 blocker — the semantics are different but the
+functional outcome (multi-token accounting native to the platform) is
+achievable.
 
 ---
 
 ### What Would Actually Be Required
 
-To build a genuine Uniswap v4 on XRPL, five things would need to exist:
+Three hard blockers remain for a genuine Uniswap v4 on XRPL:
 
-| Requirement | Closest XRPL option | Gap |
+| Requirement | Status | Closest XRPL option |
 |---|---|---|
-| Cross-contract calls | Flare Network (EVM bridge) | Different L1 entirely |
-| Transient storage | None | No EIP-1153 equivalent |
-| Deterministic contract addresses | None | No CREATE2 |
-| Shared singleton state | None | No cross-binary state |
-| ERC-6909 multi-token | XRPL issued currencies (partial) | Different model, not composable |
+| Cross-contract calls | ❌ Unsupported | Flare Network (different L1) |
+| Transient storage (EIP-1153) | ❌ No equivalent | None |
+| Deterministic addresses (CREATE2) | ❌ No equivalent | None |
+| Multi-token accounting | ✅ Resolved | XLS-33 MPTs (live on mainnet) |
+| Shared singleton state | ❌ No cross-binary state | None (would need cross-contract calls first) |
 
-The realistic path to v4 features on XRPL is **Flare Network**: an
-EVM-compatible chain with an XRPL state connector bridge. A Uniswap v4 fork
-could run natively on Flare EVM and use the bridge to read XRPL AMM prices.
-This is a different product, not an extension of this contract.
+One blocker from the original analysis — ERC-6909 multi-token claims — has
+been resolved by XLS-33 MPTs, which activated on XRPL mainnet in October 2025.
+
+The remaining three (cross-contract calls, transient storage, CREATE2) are
+architectural properties of the EVM that XRPL does not expose. All three are
+required simultaneously to make v4's unlock/callback/settle pattern work
+safely. Removing any one of them breaks the others.
+
+The realistic path to deploying a genuine Uniswap v4 against XRPL liquidity
+is **Flare Network**: an EVM-compatible L1 with an XRPL state connector
+bridge. A v4 fork could run natively on Flare EVM, with the bridge providing
+read access to XRPL AMM prices and state. That is a different product.
+
+For this project, internal hooks are sufficient: the three strategies are
+known at compile time, hooks enforce their rules on-chain, and no
+permissionless third-party hook deployment is required.
 
 ---
 
@@ -592,7 +652,7 @@ bugs:
 
 | Module | Tests | What is covered |
 |---|---|---|
-| `hooks` | 11 | All three hook variants; boundary conditions; HookId codec roundtrip |
+| `hooks` | 21 | All three hook variants; before/after initialize + swap + mint + burn + donate; boundary conditions; HookId codec roundtrip |
 | `oracle` | 8 | Init, write, observe (exact match, interpolation, live state), cardinality, idempotency |
 | `codec` | 3 | State roundtrip; pool fields; tick map |
 | `swap` | 6 | Price direction; fee accumulation; price limit; invalid limit |
@@ -600,7 +660,7 @@ bugs:
 | `tick` | 3 | Update, crossing, fee growth inside |
 | `tick_bitmap` | 4 | Flip, find, search direction |
 | `position` | 4 | Mint, burn, collect, underflow guard |
-| `lib` (integration) | 9 | Full lifecycle; pause; slippage cap; oracle; protocol fees; auth |
+| `lib` (integration) | 14 | Full lifecycle; pause; slippage cap; oracle; protocol fees; auth; donate; hook rejection on initialize |
 | `adapter` | 5 | Path selection; fallback; slippage guard; zero input |
 
 Run all tests:
