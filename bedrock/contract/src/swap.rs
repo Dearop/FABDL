@@ -41,6 +41,8 @@ pub struct SwapResult {
     pub sqrt_price_after: u128,
     /// Final tick after swap.
     pub tick_after: i32,
+    /// Active liquidity after all tick crossings have been applied.
+    pub liquidity_after: u128,
     /// Total fee growth delta to apply to the relevant global accumulator.
     pub fee_growth_delta: u128,
     /// Protocol fee collected.
@@ -52,18 +54,21 @@ pub struct SwapResult {
 /// Execute a swap, mutating tick state in place and returning the result.
 ///
 /// Parameters:
-/// - `sqrt_price_current`  — pool's current sqrt price (Q64.64)
-/// - `current_tick`        — pool's current tick
-/// - `liquidity`           — pool's active liquidity
-/// - `fee_bps`             — pool fee in basis points
-/// - `protocol_fee_bps`    — protocol's share of fee in bps (of fee, not of trade)
-/// - `fee_growth_global`   — current global fee growth for the input token (Q128)
-/// - `amount_in`           — exact input amount requested
-/// - `zero_for_one`        — swap direction (true = token0 → token1, price down)
-/// - `sqrt_price_limit`    — price boundary (hard stop)
-/// - `tick_spacing`        — pool tick spacing
-/// - `ticks`               — mutable tick map
-/// - `bitmap`              — mutable tick bitmap
+/// - `sqrt_price_current`       — pool's current sqrt price (Q64.64)
+/// - `current_tick`             — pool's current tick
+/// - `liquidity`                — pool's active liquidity
+/// - `fee_bps`                  — pool fee in basis points
+/// - `protocol_fee_bps`         — protocol's share of fee in bps (of fee, not of trade)
+/// - `fee_growth_global`        — current global fee growth for the input token (Q128)
+/// - `amount_in`                — exact input amount requested
+/// - `zero_for_one`             — swap direction (true = token0 → token1, price down)
+/// - `sqrt_price_limit`         — price boundary (hard stop)
+/// - `tick_spacing`             — pool tick spacing
+/// - `tick_cumulative`          — oracle tick cumulative at swap start (for tick crossing)
+/// - `seconds_per_liquidity_q128` — oracle spl accumulator at swap start
+/// - `timestamp`                — current block timestamp (for tick crossing oracle)
+/// - `ticks`                    — mutable tick map
+/// - `bitmap`                   — mutable tick bitmap
 #[allow(clippy::too_many_arguments)]
 pub fn execute_swap(
     sqrt_price_current: u128,
@@ -76,6 +81,9 @@ pub fn execute_swap(
     zero_for_one: bool,
     sqrt_price_limit: u128,
     tick_spacing: i32,
+    tick_cumulative: i64,
+    seconds_per_liquidity_q128: u128,
+    timestamp: u32,
     ticks: &mut TickMap,
     bitmap: &mut TickBitmap,
 ) -> Result<SwapResult, ContractError> {
@@ -193,6 +201,9 @@ pub fn execute_swap(
                 next_tick_clamped,
                 if zero_for_one { state.fee_growth_global } else { fee_growth_global },
                 if zero_for_one { fee_growth_global } else { state.fee_growth_global },
+                tick_cumulative,
+                seconds_per_liquidity_q128,
+                timestamp,
             );
 
             // Adjust active liquidity: moving right adds net, moving left subtracts.
@@ -225,6 +236,7 @@ pub fn execute_swap(
         amount_out: state.amount_out,
         sqrt_price_after: state.sqrt_price,
         tick_after: state.tick,
+        liquidity_after: state.liquidity,
         fee_growth_delta,
         protocol_fee: state.protocol_fees,
         ticks_crossed,
@@ -276,22 +288,20 @@ mod tests {
         (sqrt_price, tick, liquidity, ticks, bitmap)
     }
 
+    // Helper: call execute_swap with zeroed oracle params (tests don't care about oracle).
+    fn swap(
+        sp: u128, tick: i32, liq: u128,
+        fee_bps: u16, amount_in: u64, zero_for_one: bool, limit: u128,
+        ticks: &mut TickMap, bitmap: &mut TickBitmap,
+    ) -> Result<SwapResult, crate::types::ContractError> {
+        execute_swap(sp, tick, liq, fee_bps, 0, 0, amount_in, zero_for_one, limit, 10,
+                     0, 0, 0, ticks, bitmap)
+    }
+
     #[test]
     fn swap_one_for_zero_increases_price() {
         let (sp, tick, liq, mut ticks, mut bitmap) = simple_pool();
-        let result = execute_swap(
-            sp, tick, liq,
-            30,   // fee_bps
-            0,    // protocol_fee_share_bps
-            0,    // fee_growth_global
-            10_000,
-            false, // one_for_zero: price goes up
-            sp * 2, // limit = 2x current price
-            10,
-            &mut ticks,
-            &mut bitmap,
-        ).unwrap();
-
+        let result = swap(sp, tick, liq, 30, 10_000, false, sp * 2, &mut ticks, &mut bitmap).unwrap();
         assert!(result.sqrt_price_after > sp, "price should increase");
         assert!(result.amount_out > 0, "should produce output");
         assert!(result.amount_in <= 10_000, "used ≤ requested input");
@@ -300,19 +310,7 @@ mod tests {
     #[test]
     fn swap_zero_for_one_decreases_price() {
         let (sp, tick, liq, mut ticks, mut bitmap) = simple_pool();
-        let result = execute_swap(
-            sp, tick, liq,
-            30,
-            0,
-            0,
-            10_000,
-            true, // zero_for_one: price goes down
-            sp / 2, // limit = half current price
-            10,
-            &mut ticks,
-            &mut bitmap,
-        ).unwrap();
-
+        let result = swap(sp, tick, liq, 30, 10_000, true, sp / 2, &mut ticks, &mut bitmap).unwrap();
         assert!(result.sqrt_price_after < sp, "price should decrease");
         assert!(result.amount_out > 0);
     }
@@ -320,55 +318,22 @@ mod tests {
     #[test]
     fn swap_fee_accumulates() {
         let (sp, tick, liq, mut ticks, mut bitmap) = simple_pool();
-        let result = execute_swap(
-            sp, tick, liq,
-            100, // 1% fee
-            0,
-            0,
-            100_000,
-            false,
-            sp * 3,
-            10,
-            &mut ticks,
-            &mut bitmap,
-        ).unwrap();
+        let result = swap(sp, tick, liq, 100, 100_000, false, sp * 3, &mut ticks, &mut bitmap).unwrap();
         assert!(result.fee_growth_delta > 0, "fee growth should be positive");
     }
 
     #[test]
     fn swap_respects_price_limit() {
         let (sp, tick, liq, mut ticks, mut bitmap) = simple_pool();
-        // Set limit very close to current price.
-        let limit = sp + (sp / 100); // +1% only
-        let result = execute_swap(
-            sp, tick, liq,
-            30,
-            0,
-            0,
-            1_000_000, // large input
-            false,
-            limit,
-            10,
-            &mut ticks,
-            &mut bitmap,
-        ).unwrap();
+        let limit = sp + (sp / 100); // +1%
+        let result = swap(sp, tick, liq, 30, 1_000_000, false, limit, &mut ticks, &mut bitmap).unwrap();
         assert!(result.sqrt_price_after <= limit, "price must not exceed limit");
     }
 
     #[test]
     fn invalid_limit_direction_errors() {
         let (sp, tick, liq, mut ticks, mut bitmap) = simple_pool();
-        // zero_for_one but limit is above current price → error
-        let err = execute_swap(
-            sp, tick, liq,
-            30, 0, 0,
-            1000,
-            true,
-            sp * 2, // wrong direction
-            10,
-            &mut ticks,
-            &mut bitmap,
-        );
+        let err = swap(sp, tick, liq, 30, 1000, true, sp * 2, &mut ticks, &mut bitmap);
         assert!(err.is_err());
     }
 

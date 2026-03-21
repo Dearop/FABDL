@@ -14,7 +14,7 @@ use alloc::collections::BTreeMap;
 
 /// A single 256-bit word stored as four u64 limbs, little-endian.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
-pub struct Word256([u64; 4]);
+pub struct Word256(pub [u64; 4]);
 
 impl Word256 {
     pub fn set_bit(&mut self, bit: u8) {
@@ -67,7 +67,7 @@ impl Word256 {
 // ---------------------------------------------------------------------------
 
 pub struct TickBitmap {
-    words: BTreeMap<i16, Word256>,
+    pub words: BTreeMap<i16, Word256>,
 }
 
 impl TickBitmap {

@@ -22,9 +22,10 @@ pub struct TickState {
     pub fee_growth_outside_1_q128: u128,
     /// Seconds spent outside this tick.
     pub seconds_outside: u64,
-    /// Cumulative tick value outside.
-    pub tick_cumulative_outside: i128,
-    /// Seconds-per-liquidity outside, Q128.
+    /// Cumulative (tick × seconds) outside this boundary. i64 matches the
+    /// oracle accumulator width (tick ≤ 887272, seconds ≤ 2^32, product fits i64).
+    pub tick_cumulative_outside: i64,
+    /// Seconds-per-unit-liquidity outside this boundary, Q128.
     pub seconds_per_liquidity_outside_q128: u128,
 }
 
@@ -105,18 +106,30 @@ impl TickMap {
 
     /// Flip outside accumulators when a tick is crossed during a swap.
     ///
+    /// `tick_cumulative` and `seconds_per_liquidity_q128` are the global oracle
+    /// accumulators at the moment of crossing (pre-computed by the swap caller).
+    /// `time` is the current block timestamp.
+    ///
     /// Returns the `liquidity_net` at the crossed tick.
     pub fn cross(
         &mut self,
         tick: i32,
         fee_growth_global_0: u128,
         fee_growth_global_1: u128,
+        tick_cumulative: i64,
+        seconds_per_liquidity_q128: u128,
+        time: u32,
     ) -> i128 {
         let mut t = self.get(tick);
         t.fee_growth_outside_0_q128 =
             fee_growth_global_0.wrapping_sub(t.fee_growth_outside_0_q128);
         t.fee_growth_outside_1_q128 =
             fee_growth_global_1.wrapping_sub(t.fee_growth_outside_1_q128);
+        t.tick_cumulative_outside =
+            tick_cumulative.wrapping_sub(t.tick_cumulative_outside);
+        t.seconds_per_liquidity_outside_q128 =
+            seconds_per_liquidity_q128.wrapping_sub(t.seconds_per_liquidity_outside_q128);
+        t.seconds_outside = time.wrapping_sub(t.seconds_outside as u32) as u64;
         self.set(tick, t);
         t.liquidity_net
     }
@@ -191,7 +204,7 @@ mod tests {
         // Initialize tick at 100, current tick = 50 (below), so outside = 0.
         tm.update(100, 50, 1000, 500, 300, false).unwrap();
         // Cross with global fees = 500, 300.
-        let lnet = tm.cross(100, 500, 300);
+        let lnet = tm.cross(100, 500, 300, 0, 0, 0);
         assert_eq!(lnet, 1000);
         let t = tm.get(100);
         // outside should now be global - previous_outside = 500 - 0 = 500

@@ -122,6 +122,7 @@ impl DualPathAdapter {
             req.min_amount_out,
             if req.zero_for_one { 1 } else { 0 },
             req.sqrt_price_limit,
+            0, // timestamp: 0 in adapter (not block-time aware)
         );
 
         if amount_out == 0 && req.min_amount_out > 0 {
@@ -159,6 +160,7 @@ impl DualPathAdapter {
             req.min_amount_out,
             if req.zero_for_one { 1 } else { 0 },
             req.sqrt_price_limit,
+            0, // timestamp: 0 in adapter (not block-time aware)
         );
 
         if amount_out == 0 && req.min_amount_out > 0 {
@@ -210,7 +212,7 @@ mod tests {
     fn setup_pool() {
         test_setup(owner(), 10);
         // Initialize pool at price = 1.0 (sqrt_price = Q64).
-        uniswap_v3_xrpl_contract::initialize_pool(owner(), Q64, 30, 0);
+        uniswap_v3_xrpl_contract::initialize_pool(owner(), Q64, 30, 0, 0);
         // Add liquidity so swaps produce output.
         uniswap_v3_xrpl_contract::mint(owner(), -1000, 1000, 1_000_000_000);
     }

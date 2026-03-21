@@ -31,7 +31,7 @@ pub struct PositionState {
     pub tokens_owed_1: u128,
 }
 
-pub struct PositionMap(BTreeMap<PositionKey, PositionState>);
+pub struct PositionMap(pub BTreeMap<PositionKey, PositionState>);
 
 impl PositionMap {
     pub fn new() -> Self {
