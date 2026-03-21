@@ -1,0 +1,11 @@
+Deployment Details:
+  Transaction Hash: 30592E5B1648E1874D9378DDF23502FC28054CEBEAF468AC171209FE28AE7D68
+  Contract Account: rEBBYovhc3HWGUJeUDBRG1HBQahverDaZ8
+  Contract Index: 6F2A028FDBB9E9A8E8E7207ED5633005EB59428D0CBD40FE93E01B06F77FBEDA
+  Wallet Address: rKeLZAQ14cbpDHGQaRLvSBjeHNrAm6HU1M
+  Wallet Seed: snuF*********************7EcS
+
+💡 Tips:
+   • Use --verbose to see the full wallet seed
+   • Save the wallet seed to interact with the contract later
+   • Call functions with: bedrock call rEBBYovhc3HWGUJeUDBRG1HBQahverDaZ8 <function-name> --wallet snuFTAkDRWxMZdE1APubjQzeS7EcS

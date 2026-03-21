@@ -1,10 +1,17 @@
 [project]
-name = "uniswap-v3-xrpl"
+name = "my-contract2"
 version = "0.1.0"
+authors = ["Your Name"]
 
 [build]
 source = "contract/src/lib.rs"
+output = "contract/target/wasm32-unknown-unknown/release"
 target = "wasm32-unknown-unknown"
+
+[local_node]
+config_dir = ".bedrock/node-config"
+docker_image = "transia/cluster:f5d78179c9d1fbaf8bff8b77a052e263df90faa1"
+ledger_interval = 1000
 
 [networks.local]
 url = "ws://localhost:6006"
@@ -15,3 +22,10 @@ faucet_url = "http://localhost:8080/faucet"
 url = "wss://alphanet.nerdnest.xyz"
 network_id = 21465
 faucet_url = "https://alphanet.faucet.nerdnest.xyz/accounts"
+
+[contracts.main]
+source = "contract/src/lib.rs"
+abi = "contract/build/abi.json"
+
+[wallets]
+keystore = ".wallets/keystore.json"
