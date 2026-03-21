@@ -12,7 +12,7 @@ fn alice() -> [u8; 20] { [2u8; 20] }
 /// Initialise a pool with liquidity ready for adapter-level swap tests.
 fn setup_pool_with_liquidity() {
     test_setup(owner(), 10);
-    uniswap_v3_xrpl_contract::initialize_pool(owner(), Q64, 30, 0, 0, 0);
+    uniswap_v3_xrpl_contract::initialize_pool(owner(), Q64, 30, 0, 0);
     uniswap_v3_xrpl_contract::mint(owner(), (-1000_i32) as u32, 1000, 1_000_000_000);
 }
 

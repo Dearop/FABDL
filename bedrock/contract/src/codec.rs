@@ -91,7 +91,6 @@ impl<'a> ByteReader<'a> {
 // Per-struct encode / decode
 // ---------------------------------------------------------------------------
 
-use crate::hooks::HookId;
 use crate::oracle::Observation;
 use crate::position::PositionState;
 use crate::tick::TickState;
@@ -130,13 +129,12 @@ pub(crate) fn decode_pool(r: &mut ByteReader) -> Option<super::PoolState> {
     })
 }
 
-// --- ContractConfig (28 bytes) ---
+// --- ContractConfig (27 bytes) ---
 pub(crate) fn encode_config(w: &mut ByteWriter, c: &super::ContractConfig) {
     w.bytes20(&c.owner);
     w.u8(c.paused as u8);
     w.u16(c.max_slippage_bps);
     w.i32(c.tick_spacing);
-    w.u8(c.hook_id.to_u8());
 }
 
 pub(crate) fn decode_config(r: &mut ByteReader) -> Option<super::ContractConfig> {
@@ -145,7 +143,6 @@ pub(crate) fn decode_config(r: &mut ByteReader) -> Option<super::ContractConfig>
         paused: r.u8()? != 0,
         max_slippage_bps: r.u16()?,
         tick_spacing: r.i32()?,
-        hook_id: HookId::from_u8(r.u8()?),
     })
 }
 
