@@ -19,16 +19,18 @@ backend/.pytest_cache/
 
 # LLM Orchestration
 llm-orchestration/__pycache__/
+llm-orchestration/**/__pycache__/
 llm-orchestration/*.pyc
 llm-orchestration/venv/
 llm-orchestration/env/
 llm-orchestration/.env
 llm-orchestration/.pytest_cache/
 
-# Rust (Bedrock)
-bedrock/target/
+# Rust (All projects)
+**/target/
 Cargo.lock
 **/*.rs.bk
+**/Cargo.lock
 
 # IDE / Editor
 .vscode/settings.json

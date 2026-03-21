@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 import subprocess
 import sys
+import os
 from typing import Optional, Dict, Any
 
 # Import your generated proto files
@@ -78,11 +79,14 @@ REMEMBER: RESPOND ONLY WITH JSON. NO WORDS BEFORE OR AFTER."""
             if self.use_ollama:
                 # Using Ollama CLI (assumes `ollama serve` is running)
                 # First call takes longer as model loads into VRAM
+                env = os.environ.copy()
+                env.setdefault("OLLAMA_HOST", "127.0.0.1:11434")
                 result = subprocess.run(
                     ["ollama", "run", self.llm_model, prompt],
                     capture_output=True,
                     text=True,
-                    timeout=60  # 60s timeout (model loads into GPU memory first time)
+                    timeout=60,  # 60s timeout (model loads into GPU memory first time)
+                    env=env,
                 )
                 
                 if result.returncode == 0:
@@ -102,6 +106,42 @@ REMEMBER: RESPOND ONLY WITH JSON. NO WORDS BEFORE OR AFTER."""
         except Exception as e:
             logger.error(f"LLM error: {e}")
             return None
+
+    def _classify_with_keywords(self, query: str) -> Optional[Dict[str, Any]]:
+        """
+        Rule-based fallback classifier used when the local LLM is unavailable.
+        Covers the most common query patterns with reasonable confidence.
+        """
+        q = query.lower()
+
+        # execute / confirm intent
+        if any(w in q for w in ["execute", "confirm", "do it", "proceed", "go ahead", "run it"]):
+            return {"action": "execute_strategy", "scope": "portfolio", "confidence": 0.75, "parameters": {}}
+
+        # price lookup intent
+        if any(w in q for w in ["price", "worth", "how much", "value", "rate", "cost"]):
+            scope = "specific_asset"
+            params: Dict[str, Any] = {}
+            for asset in ["xrp", "usd", "btc", "eth", "usdc", "usdt"]:
+                if asset in q:
+                    params["asset"] = asset.upper()
+                    break
+            return {"action": "get_price", "scope": scope, "confidence": 0.75, "parameters": params}
+
+        # check position intent
+        if any(w in q for w in ["check", "status", "show", "display", "view", "what is my"]):
+            return {"action": "check_position", "scope": "portfolio", "confidence": 0.70, "parameters": {}}
+
+        # analyze / risk / rebalance intent (broadest category — default)
+        if any(w in q for w in [
+            "rebalance", "analyze", "analyse", "risk", "portfolio", "hedge",
+            "il", "impermanent", "loss", "sharpe", "var", "volatility",
+            "strategy", "should i", "what should", "recommend", "advice",
+        ]):
+            return {"action": "analyze_risk", "scope": "portfolio", "confidence": 0.72, "parameters": {}}
+
+        # Generic fallback — treat any unrecognised query as a portfolio analysis request
+        return {"action": "analyze_risk", "scope": "portfolio", "confidence": 0.60, "parameters": {}}
 
     def _parse_intent_response(self, llm_output: str) -> Optional[Dict[str, Any]]:
         """
@@ -175,30 +215,20 @@ REMEMBER: RESPOND ONLY WITH JSON. NO WORDS BEFORE OR AFTER."""
         llm_output = self._call_local_llm(prompt)
         
         if not llm_output:
-            print(f"❌ [Intent Router] LLM inference returned None")
-            logger.warning("LLM inference returned None")
-            return intent_router_pb2.IntentResponse(
-                action="error",
-                scope="unknown",
-                is_valid=False,
-                confidence=0.0
-            )
-        
-        print(f"📝 [Intent Router] LLM output:\n{llm_output}\n")
-        
-        # Parse and validate response
-        print(f"🔍 [Intent Router] Parsing response...")
-        parsed = self._parse_intent_response(llm_output)
-        
-        if not parsed:
-            print(f"❌ [Intent Router] Failed to parse intent response")
-            logger.warning("Failed to parse intent response")
-            return intent_router_pb2.IntentResponse(
-                action="error",
-                scope="unknown",
-                is_valid=False,
-                confidence=0.0
-            )
+            print(f"⚠️  [Intent Router] LLM unavailable — using keyword fallback")
+            logger.warning("LLM inference returned None; falling back to keyword classifier")
+            parsed = self._classify_with_keywords(request.user_query)
+        else:
+            print(f"📝 [Intent Router] LLM output:\n{llm_output}\n")
+
+            # Parse and validate response
+            print(f"🔍 [Intent Router] Parsing response...")
+            parsed = self._parse_intent_response(llm_output)
+
+            if not parsed:
+                print(f"⚠️  [Intent Router] LLM parse failed — using keyword fallback")
+                logger.warning("Failed to parse LLM response; falling back to keyword classifier")
+                parsed = self._classify_with_keywords(request.user_query)
         
         print(f"✅ [Intent Router] Successfully classified:")
         print(f"   Action: {parsed.get('action')}")
