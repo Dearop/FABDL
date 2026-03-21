@@ -321,20 +321,20 @@ pub fn initialize_pool(
 }
 
 /// @xrpl-function mint
-/// @param lower_tick INT32 - Lower tick boundary
-/// @param upper_tick INT32 - Upper tick boundary
+/// @param lower_tick UINT32 - Lower tick boundary (two's-complement; pass e.g. 0xFFFFFC18 for -1000)
+/// @param upper_tick UINT32 - Upper tick boundary (two's-complement)
 /// @param liquidity_delta UINT128 - Positive liquidity amount to add
 /// @return UINT32 - 0 on success
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn mint(
     sender: AccountId,
-    lower_tick: i32,
-    upper_tick: i32,
+    lower_tick: u32,
+    upper_tick: u32,
     liquidity_delta: u128,
 ) -> u32 {
     with_storage!({
         wasm_trace!("mint");
-        match mint_inner(sender, lower_tick, upper_tick, liquidity_delta) {
+        match mint_inner(sender, lower_tick as i32, upper_tick as i32, liquidity_delta) {
             Ok(_) => 0,
             Err(e) => e.code(),
         }
@@ -423,20 +423,20 @@ fn mint_inner(
 }
 
 /// @xrpl-function burn
-/// @param lower_tick INT32 - Lower tick boundary
-/// @param upper_tick INT32 - Upper tick boundary
+/// @param lower_tick UINT32 - Lower tick boundary (two's-complement; pass e.g. 0xFFFFFC18 for -1000)
+/// @param upper_tick UINT32 - Upper tick boundary (two's-complement)
 /// @param liquidity_delta UINT128 - Positive liquidity amount to remove
 /// @return UINT32 - 0 on success
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn burn(
     sender: AccountId,
-    lower_tick: i32,
-    upper_tick: i32,
+    lower_tick: u32,
+    upper_tick: u32,
     liquidity_delta: u128,
 ) -> u32 {
     with_storage!({
         wasm_trace!("burn");
-        match burn_inner(sender, lower_tick, upper_tick, liquidity_delta) {
+        match burn_inner(sender, lower_tick as i32, upper_tick as i32, liquidity_delta) {
             Ok(_) => 0,
             Err(e) => e.code(),
         }
@@ -518,16 +518,16 @@ fn burn_inner(
 }
 
 /// @xrpl-function collect
-/// @param lower_tick INT32 - Lower tick boundary
-/// @param upper_tick INT32 - Upper tick boundary
+/// @param lower_tick UINT32 - Lower tick boundary (two's-complement; pass e.g. 0xFFFFFC18 for -1000)
+/// @param upper_tick UINT32 - Upper tick boundary (two's-complement)
 /// @param max_amount_0 UINT64 - Max token0 to collect
 /// @param max_amount_1 UINT64 - Max token1 to collect
 /// @return UINT32 - 0 on success
 #[cfg_attr(target_arch = "wasm32", wasm_export)]
 pub fn collect(
     sender: AccountId,
-    lower_tick: i32,
-    upper_tick: i32,
+    lower_tick: u32,
+    upper_tick: u32,
     max_amount_0: u64,
     max_amount_1: u64,
 ) -> u32 {
@@ -536,7 +536,7 @@ pub fn collect(
         if require_not_paused().is_err() {
             return ContractError::Paused.code();
         }
-        let pos_key = PositionKey { owner: sender, lower_tick, upper_tick };
+        let pos_key = PositionKey { owner: sender, lower_tick: lower_tick as i32, upper_tick: upper_tick as i32 };
         with_state(|s| s.positions.collect(pos_key, max_amount_0, max_amount_1));
         0
     })
@@ -888,8 +888,10 @@ mod tests {
         assert_eq!(initialize_pool(owner(), Q64, 30, 0, 1_000_000, 0), 0);
     }
 
+    fn tick(t: i32) -> u32 { t as u32 }
+
     fn add_liquidity() {
-        assert_eq!(mint(alice(), -1000, 1000, 1_000_000_000), 0);
+        assert_eq!(mint(alice(), tick(-1000), 1000, 1_000_000_000), 0);
     }
 
     #[test]
@@ -929,7 +931,7 @@ mod tests {
         init_pool();
         add_liquidity();
         let liq = get_liquidity();
-        assert_eq!(burn(alice(), -1000, 1000, 500_000_000), 0);
+        assert_eq!(burn(alice(), tick(-1000), 1000, 500_000_000), 0);
         assert!(get_liquidity() < liq);
     }
 
@@ -937,8 +939,8 @@ mod tests {
     fn collect_works_after_burn() {
         init_pool();
         add_liquidity();
-        burn(alice(), -1000, 1000, 1_000_000_000);
-        assert_eq!(collect(alice(), -1000, 1000, u64::MAX, u64::MAX), 0);
+        burn(alice(), tick(-1000), 1000, 1_000_000_000);
+        assert_eq!(collect(alice(), tick(-1000), 1000, u64::MAX, u64::MAX), 0);
     }
 
     #[test]

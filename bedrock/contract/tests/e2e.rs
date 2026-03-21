@@ -21,6 +21,10 @@ fn owner() -> [u8; 20] { [1u8; 20] }
 fn alice() -> [u8; 20] { [2u8; 20] }
 fn bob()   -> [u8; 20] { [3u8; 20] }
 
+/// Cast a signed tick value to the u32 two's-complement representation expected
+/// by the ABI (Bedrock has no signed integer types).
+fn tick(t: i32) -> u32 { t as u32 }
+
 /// Initialize a standard pool: price=1.0, 0.3% fee, tick_spacing=10, no hook.
 fn std_pool() {
     test_setup(owner(), 10);
@@ -30,7 +34,7 @@ fn std_pool() {
 
 /// Add a ±1000-tick range of liquidity on behalf of `lp`.
 fn add_liquidity(lp: [u8; 20], amount: u128) {
-    assert_eq!(mint(lp, -1000, 1000, amount), 0, "mint should succeed");
+    assert_eq!(mint(lp, tick(-1000), 1000, amount), 0, "mint should succeed");
 }
 
 // ---------------------------------------------------------------------------
@@ -62,11 +66,11 @@ fn full_lp_lifecycle() {
     assert!(get_sqrt_price() < price_mid, "price should fall on token0→token1 swap");
 
     // Alice burns all liquidity.
-    assert_eq!(burn(alice(), -1000, 1000, 1_000_000_000), 0, "burn should succeed");
+    assert_eq!(burn(alice(), tick(-1000), 1000, 1_000_000_000), 0, "burn should succeed");
     assert_eq!(get_liquidity(), 0, "liquidity should be zero after full burn");
 
     // Alice collects accrued fees (succeeds even if amounts are small).
-    assert_eq!(collect(alice(), -1000, 1000, u64::MAX, u64::MAX), 0,
+    assert_eq!(collect(alice(), tick(-1000), 1000, u64::MAX, u64::MAX), 0,
                "collect should succeed after burn");
 }
 
@@ -79,8 +83,8 @@ fn multiple_lps_share_fee_growth() {
     std_pool();
 
     // Alice adds 2× more liquidity than Bob in the same range.
-    assert_eq!(mint(alice(), -1000, 1000, 2_000_000_000), 0);
-    assert_eq!(mint(bob(),   -1000, 1000, 1_000_000_000), 0);
+    assert_eq!(mint(alice(), tick(-1000), 1000, 2_000_000_000), 0);
+    assert_eq!(mint(bob(),   tick(-1000), 1000, 1_000_000_000), 0);
 
     let liq_total = get_liquidity();
     assert_eq!(liq_total, 3_000_000_000, "total liquidity = alice + bob");
@@ -96,10 +100,10 @@ fn multiple_lps_share_fee_growth() {
 
     // Both LPs can collect — no assertion on amounts since collect returns only
     // an error code, but neither call should fail.
-    burn(alice(), -1000, 1000, 2_000_000_000);
-    burn(bob(),   -1000, 1000, 1_000_000_000);
-    assert_eq!(collect(alice(), -1000, 1000, u64::MAX, u64::MAX), 0);
-    assert_eq!(collect(bob(),   -1000, 1000, u64::MAX, u64::MAX), 0);
+    burn(alice(), tick(-1000), 1000, 2_000_000_000);
+    burn(bob(),   tick(-1000), 1000, 1_000_000_000);
+    assert_eq!(collect(alice(), tick(-1000), 1000, u64::MAX, u64::MAX), 0);
+    assert_eq!(collect(bob(),   tick(-1000), 1000, u64::MAX, u64::MAX), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -142,11 +146,11 @@ fn conservative_hook_rejects_narrow_mint() {
     assert_eq!(initialize_pool(owner(), Q64, 30, 0, 1_000_000, 1), 0);
 
     // Position width = 190 ticks — below the 200-tick minimum.
-    let err = mint(alice(), -95, 95, 1_000_000_000);
+    let err = mint(alice(), tick(-95), 95, 1_000_000_000);
     assert_ne!(err, 0, "hook should reject < 200-tick positions");
 
     // Position width = 200 ticks — exactly at the limit.
-    assert_eq!(mint(alice(), -100, 100, 1_000_000_000), 0,
+    assert_eq!(mint(alice(), tick(-100), 100, 1_000_000_000), 0,
                "hook should allow exactly 200-tick positions");
 }
 
@@ -155,7 +159,7 @@ fn conservative_hook_blocks_oversized_swap() {
     test_setup(owner(), 10);
     assert_eq!(initialize_pool(owner(), Q64, 30, 0, 1_000_000, 1), 0);
     // Must use a wide-enough range (>= 200 ticks).
-    assert_eq!(mint(alice(), -1000, 1000, 1_000_000), 0);
+    assert_eq!(mint(alice(), tick(-1000), 1000, 1_000_000), 0);
 
     // Liquidity = 1_000_000. Cap = 1_000_000 / 20 = 50_000.
     // Attempt a swap with amount_in = 50_001 → above cap.
@@ -171,15 +175,15 @@ fn conservative_hook_blocks_oversized_swap() {
 fn conservative_hook_full_lifecycle() {
     test_setup(owner(), 10);
     assert_eq!(initialize_pool(owner(), Q64, 30, 0, 1_000_000, 1), 0);
-    assert_eq!(mint(alice(), -500, 500, 500_000_000), 0);
+    assert_eq!(mint(alice(), tick(-500), 500, 500_000_000), 0);
 
     // Small swap (well within 5% cap) succeeds.
     let out = swap_exact_in(alice(), 1_000, 990, 0, Q64 * 2, 1_000_100);
     assert!(out > 0, "small swap should succeed under conservative hook");
 
     // LP can exit normally.
-    assert_eq!(burn(alice(), -500, 500, 500_000_000), 0);
-    assert_eq!(collect(alice(), -500, 500, u64::MAX, u64::MAX), 0);
+    assert_eq!(burn(alice(), tick(-500), 500, 500_000_000), 0);
+    assert_eq!(collect(alice(), tick(-500), 500, u64::MAX, u64::MAX), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -196,11 +200,11 @@ fn yield_hook_rejects_out_of_range_mint() {
                "yield hook should reject position above current tick");
 
     // Position entirely below → rejected.
-    assert_ne!(mint(alice(), -1000, -10, 1_000_000_000), 0,
+    assert_ne!(mint(alice(), tick(-1000), tick(-10), 1_000_000_000), 0,
                "yield hook should reject position below current tick");
 
     // Position straddling tick 0 → allowed.
-    assert_eq!(mint(alice(), -500, 500, 1_000_000_000), 0,
+    assert_eq!(mint(alice(), tick(-500), 500, 1_000_000_000), 0,
                "yield hook should allow position straddling current tick");
 }
 
@@ -208,15 +212,15 @@ fn yield_hook_rejects_out_of_range_mint() {
 fn yield_hook_allows_burn_regardless_of_price() {
     test_setup(owner(), 10);
     assert_eq!(initialize_pool(owner(), Q64, 30, 0, 1_000_000, 2), 0);
-    assert_eq!(mint(alice(), -500, 500, 1_000_000_000), 0);
+    assert_eq!(mint(alice(), tick(-500), 500, 1_000_000_000), 0);
 
     // Large swap pushes price well outside alice's range.
     swap_exact_in(alice(), 900_000, 0, 0, Q64 * 10, 1_000_100);
 
     // Alice can still burn even though her position may be out of range now.
-    assert_eq!(burn(alice(), -500, 500, 1_000_000_000), 0,
+    assert_eq!(burn(alice(), tick(-500), 500, 1_000_000_000), 0,
                "burn should always be allowed regardless of current price");
-    assert_eq!(collect(alice(), -500, 500, u64::MAX, u64::MAX), 0);
+    assert_eq!(collect(alice(), tick(-500), 500, u64::MAX, u64::MAX), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,10 +276,10 @@ fn donate_collectable_after_burn() {
     assert_eq!(donate(alice(), 100_000, 100_000), 0);
 
     // Burn position — this crystallises accrued fees into tokens_owed.
-    assert_eq!(burn(alice(), -1000, 1000, 1_000_000_000), 0);
+    assert_eq!(burn(alice(), tick(-1000), 1000, 1_000_000_000), 0);
 
     // Collect should succeed (amounts are tracked internally; return is 0 on success).
-    assert_eq!(collect(alice(), -1000, 1000, u64::MAX, u64::MAX), 0);
+    assert_eq!(collect(alice(), tick(-1000), 1000, u64::MAX, u64::MAX), 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -342,11 +346,11 @@ fn pause_blocks_all_operations_unpause_restores_them() {
     // All mutating operations should fail.
     assert_eq!(swap_exact_in(alice(), 10_000, 9_900, 0, Q64 * 2, 1_000_100), 0,
                "swap should return 0 (failure) when paused");
-    assert_ne!(mint(alice(), -1000, 1000, 1_000_000_000), 0,
+    assert_ne!(mint(alice(), tick(-1000), 1000, 1_000_000_000), 0,
                "mint should error when paused");
-    assert_ne!(burn(alice(), -1000, 1000, 500_000_000), 0,
+    assert_ne!(burn(alice(), tick(-1000), 1000, 500_000_000), 0,
                "burn should error when paused");
-    assert_ne!(collect(alice(), -1000, 1000, u64::MAX, u64::MAX), 0,
+    assert_ne!(collect(alice(), tick(-1000), 1000, u64::MAX, u64::MAX), 0,
                "collect should error when paused");
     assert_ne!(donate(alice(), 1_000, 1_000), 0,
                "donate should error when paused");
@@ -429,8 +433,8 @@ fn swap_crosses_multiple_ticks() {
     std_pool();
 
     // Mint three adjacent but distinct ranges to create initialised tick boundaries.
-    assert_eq!(mint(alice(), -3000, -1000, 500_000_000), 0);
-    assert_eq!(mint(alice(), -1000,     0, 500_000_000), 0);
+    assert_eq!(mint(alice(), tick(-3000), tick(-1000), 500_000_000), 0);
+    assert_eq!(mint(alice(), tick(-1000),     0, 500_000_000), 0);
     assert_eq!(mint(alice(),     0,  1000, 500_000_000), 0);
     assert_eq!(mint(alice(),  1000,  3000, 500_000_000), 0);
 
@@ -464,7 +468,7 @@ fn out_of_range_position_contributes_zero_active_liquidity() {
     std_pool();
 
     // Add in-range position: contributes to active liquidity.
-    mint(alice(), -1000, 1000, 1_000_000_000);
+    mint(alice(), tick(-1000), 1000, 1_000_000_000);
     let liq_with_in_range = get_liquidity();
 
     // Add out-of-range position entirely above current tick.
@@ -476,7 +480,7 @@ fn out_of_range_position_contributes_zero_active_liquidity() {
                "out-of-range mint should not change active liquidity");
 
     // But an in-range position should.
-    mint(bob(), -500, 500, 500_000_000);
+    mint(bob(), tick(-500), 500, 500_000_000);
     let liq_after_second_in_range = get_liquidity();
     assert!(liq_after_second_in_range > liq_after_out_of_range,
             "second in-range mint should increase active liquidity");
@@ -491,7 +495,7 @@ fn fees_only_accrue_when_position_is_in_range() {
     std_pool();
 
     // Alice is in range, Bob is not.
-    mint(alice(), -1000, 1000, 1_000_000_000);
+    mint(alice(), tick(-1000), 1000, 1_000_000_000);
     mint(bob(),    2000, 5000, 1_000_000_000);
 
     // Swaps happen within Alice's range.
@@ -501,9 +505,9 @@ fn fees_only_accrue_when_position_is_in_range() {
 
     // Both can call collect — Alice's position earned fees; Bob's earned nothing.
     // Since collect's return value is just an error code we confirm neither panics.
-    burn(alice(), -1000, 1000, 1_000_000_000);
+    burn(alice(), tick(-1000), 1000, 1_000_000_000);
     burn(bob(),    2000, 5000, 1_000_000_000);
-    assert_eq!(collect(alice(), -1000, 1000, u64::MAX, u64::MAX), 0);
+    assert_eq!(collect(alice(), tick(-1000), 1000, u64::MAX, u64::MAX), 0);
     assert_eq!(collect(bob(),    2000, 5000, u64::MAX, u64::MAX), 0);
 }
 

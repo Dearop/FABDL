@@ -214,7 +214,7 @@ mod tests {
         // Initialize pool at price = 1.0 (sqrt_price = Q64).
         uniswap_v3_xrpl_contract::initialize_pool(owner(), Q64, 30, 0, 0, 0);
         // Add liquidity so swaps produce output.
-        uniswap_v3_xrpl_contract::mint(owner(), -1000, 1000, 1_000_000_000);
+        uniswap_v3_xrpl_contract::mint(owner(), (-1000_i32) as u32, 1000, 1_000_000_000);
     }
 
     fn req(amount_in: u64, zero_for_one: bool) -> SwapRequest {
