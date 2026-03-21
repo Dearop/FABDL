@@ -1,0 +1,151 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+import "sf/xrpl/type/v1/amount.proto";
+
+// AMMCreate - Creates an Automated Market Maker instance
+// Reference: https://xrpl.org/ammcreate.html
+message AMMCreate {
+  // First asset to deposit
+  Amount amount = 1;
+
+  // Second asset to deposit
+  Amount amount2 = 2;
+
+  // Trading fee (0-1000, representing 0-1%)
+  uint32 trading_fee = 3;
+}
+
+// AMMDeposit - Deposits assets into an AMM
+// Reference: https://xrpl.org/ammdeposit.html
+message AMMDeposit {
+  // First asset identifier
+  Asset asset = 1;
+
+  // Second asset identifier
+  Asset asset2 = 2;
+
+  // (Optional) Amount of first asset to deposit
+  Amount amount = 3;
+
+  // (Optional) Amount of second asset to deposit
+  Amount amount2 = 4;
+
+  // (Optional) Effective price for single-asset deposit
+  Amount e_price = 5;
+
+  // (Optional) LP tokens to receive
+  Amount lp_token_out = 6;
+
+  // (Optional) Trading fee for the AMM
+  uint32 trading_fee = 7;
+
+  // (Optional) Transaction flags for deposit mode
+  // tfLPToken = 65536 (0x00010000) - Double-asset deposit for specified LP tokens
+  // tfSingleAsset = 524288 (0x00080000) - Single-asset deposit
+  // tfTwoAsset = 1048576 (0x00100000) - Double-asset deposit with specified amounts
+  // tfOneAssetLPToken = 2097152 (0x00200000) - Single-asset deposit for specified LP tokens
+  // tfLimitLPToken = 4194304 (0x00400000) - Single-asset deposit with price limit
+  // tfTwoAssetIfEmpty = 8388608 (0x00800000) - Special deposit to empty AMM
+  uint32 flags = 8;
+}
+
+// AMMWithdraw - Withdraws assets from an AMM
+// Reference: https://xrpl.org/ammwithdraw.html
+message AMMWithdraw {
+  // First asset identifier
+  Asset asset = 1;
+
+  // Second asset identifier
+  Asset asset2 = 2;
+
+  // (Optional) Amount of first asset to withdraw
+  Amount amount = 3;
+
+  // (Optional) Amount of second asset to withdraw
+  Amount amount2 = 4;
+
+  // (Optional) Effective price for single-asset withdrawal
+  Amount e_price = 5;
+
+  // (Optional) LP tokens to burn
+  Amount lp_token_in = 6;
+
+  // (Optional) Transaction flags for withdrawal mode
+  // tfLPToken = 65536 (0x00010000) - Double-asset withdrawal for specified LP tokens
+  // tfWithdrawAll = 131072 (0x00020000) - Withdraw all LP tokens (double-asset)
+  // tfOneAssetWithdrawAll = 262144 (0x00040000) - Withdraw all LP tokens (single-asset)
+  // tfSingleAsset = 524288 (0x00080000) - Single-asset withdrawal
+  // tfTwoAsset = 1048576 (0x00100000) - Double-asset withdrawal with specified amounts
+  // tfOneAssetLPToken = 2097152 (0x00200000) - Single-asset withdrawal for specified LP tokens
+  // tfLimitLPToken = 4194304 (0x00400000) - Single-asset withdrawal with price limit
+  uint32 flags = 7;
+}
+
+// AMMVote - Votes on the trading fee for an AMM
+// Reference: https://xrpl.org/ammvote.html
+message AMMVote {
+  // First asset identifier
+  Asset asset = 1;
+
+  // Second asset identifier
+  Asset asset2 = 2;
+
+  // Proposed trading fee (0-1000)
+  uint32 trading_fee = 3;
+}
+
+// AMMBid - Bids on the auction slot of an AMM
+// Reference: https://xrpl.org/ammbid.html
+message AMMBid {
+  // First asset identifier
+  Asset asset = 1;
+
+  // Second asset identifier
+  Asset asset2 = 2;
+
+  // (Optional) Minimum bid in LP tokens
+  Amount bid_min = 3;
+
+  // (Optional) Maximum bid in LP tokens
+  Amount bid_max = 4;
+
+  // (Optional) Accounts authorized to trade at discounted fee
+  repeated AuthAccount auth_accounts = 5;
+}
+
+message AuthAccount {
+  string account = 1;
+}
+
+// AMMDelete - Deletes an empty AMM instance
+// Reference: https://xrpl.org/ammdelete.html
+message AMMDelete {
+  // First asset identifier
+  Asset asset = 1;
+
+  // Second asset identifier
+  Asset asset2 = 2;
+}
+
+// AMMClawback - Claws back tokens from an AMM pool
+// Reference: https://xrpl.org/ammclawback.html
+message AMMClawback {
+  // Holder of the LP tokens
+  string holder = 1;
+
+  // First asset identifier
+  Asset asset = 2;
+
+  // Second asset identifier
+  Asset asset2 = 3;
+
+  // (Optional) Amount to claw back
+  Amount amount = 4;
+
+  // (Optional) Transaction flags
+  // tfClawTwoAssets = 1 (0x00000001) - Claw back both assets proportionally
+  uint32 flags = 5;
+}

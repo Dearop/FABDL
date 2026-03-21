@@ -1,0 +1,16 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+import "sf/xrpl/type/v1/amount.proto";
+
+// Clawback - Claws back issued tokens from a holder
+// Reference: https://xrpl.org/clawback.html
+message Clawback {
+  // Amount to claw back (includes holder's address in issuer field)
+  Amount amount = 1;
+
+  // (Optional) Holder account for MPT clawback
+  string holder = 2;
+}

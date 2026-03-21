@@ -1,0 +1,57 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+import "sf/xrpl/type/v1/amount.proto";
+
+// EscrowCreate - Creates a held payment
+// Reference: https://xrpl.org/escrowcreate.html
+message EscrowCreate {
+  // Amount to escrow
+  Amount amount = 1;
+
+  // Recipient of escrowed funds
+  string destination = 2;
+
+  // (Optional) Time after which escrow can be cancelled
+  uint32 cancel_after = 3;
+
+  // (Optional) Time after which escrow can be finished
+  uint32 finish_after = 4;
+
+  // (Optional) Crypto-condition that must be fulfilled (hex)
+  string condition = 5;
+
+  // (Optional) Destination tag
+  uint32 destination_tag = 6;
+}
+
+// EscrowFinish - Completes a held payment
+// Reference: https://xrpl.org/escrowfinish.html
+message EscrowFinish {
+  // Owner of the escrow
+  string owner = 1;
+
+  // Sequence of EscrowCreate transaction
+  uint32 offer_sequence = 2;
+
+  // (Optional) Crypto-condition (hex)
+  string condition = 3;
+
+  // (Optional) Fulfillment for condition (hex)
+  string fulfillment = 4;
+
+  // (Optional) Set of Credentials to authorize deposit (array of ledger entry IDs)
+  repeated string credential_ids = 5;
+}
+
+// EscrowCancel - Cancels a held payment
+// Reference: https://xrpl.org/escrowcancel.html
+message EscrowCancel {
+  // Owner of the escrow
+  string owner = 1;
+
+  // Sequence of EscrowCreate transaction
+  uint32 offer_sequence = 2;
+}

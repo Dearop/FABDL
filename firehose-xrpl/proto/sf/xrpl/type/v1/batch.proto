@@ -1,0 +1,49 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+import "sf/xrpl/type/v1/signer.proto";
+
+// Batch - Submit multiple transactions atomically
+// Reference: https://xrpl.org/batch.html
+message Batch {
+  // List of raw transactions to execute (minimum 2, maximum 8)
+  repeated RawTransaction raw_transactions = 1;
+
+  // (Optional) Signatures for multi-account batch transactions
+  repeated BatchSigner batch_signers = 2;
+
+  // Transaction flags for batch execution mode (required)
+  // tfAllOrNothing = 65536 (0x00010000) - All transactions must succeed or
+  // batch fails tfOnlyOne = 131072 (0x00020000) - Only first successful
+  // transaction is applied tfUntilFailure = 262144 (0x00040000) - Apply until
+  // first failure, skip rest tfIndependent = 524288 (0x00080000) - Apply all
+  // transactions regardless of failure
+  uint32 flags = 3;
+}
+
+// RawTransaction - Inner transaction within a batch
+message RawTransaction {
+  // The serialized transaction data (JSON encoded)
+  // Must have tfInnerBatchTxn flag (1073741824 / 0x40000000)
+  // Must have Fee = "0"
+  // Must have SigningPubKey = ""
+  // Must not have TxnSignature
+  bytes raw_transaction = 1;
+}
+
+// BatchSigner - Signature for an account in multi-account batch
+message BatchSigner {
+  // Account with at least one inner transaction
+  string account = 1;
+
+  // (Optional) Hex representation of public key
+  string signing_pub_key = 2;
+
+  // (Optional) Signature from this account
+  string txn_signature = 3;
+
+  // (Optional) Multi-signature array (alternative to single signature)
+  repeated Signer signers = 4;
+}

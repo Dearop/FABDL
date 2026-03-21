@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  firehose-xrpl:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+    environment:
+      - XRPL_RPC_ENDPOINT=https://s1.ripple.com:51234/
+      - START_BLOCK=80000000
+    volumes:
+      - firehose-data:/data
+    command: >
+      start reader-node merger
+      --reader-node-path=/app/firexrpl
+      --reader-node-arguments="fetch rpc ${START_BLOCK:-80000000}
+        --state-dir /data/poller
+        --endpoints ${XRPL_RPC_ENDPOINT:-https://s1.ripple.com:51234/}"
+      --common-merged-blocks-store-url=/data/merged-blocks
+      --common-one-block-store-url=/data/one-blocks
+      --common-first-streamable-block=${START_BLOCK:-80000000}
+    ports:
+      - "9000:9000"  # Firehose gRPC
+      - "8080:8080"  # Metrics
+    restart: unless-stopped
+
+volumes:
+  firehose-data:

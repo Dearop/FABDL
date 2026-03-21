@@ -1,0 +1,11 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+// TicketCreate - Creates Ticket objects for future transactions
+// Reference: https://xrpl.org/ticketcreate.html
+message TicketCreate {
+  // Number of tickets to create (1-250)
+  uint32 ticket_count = 1;
+}

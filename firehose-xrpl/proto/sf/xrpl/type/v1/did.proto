@@ -1,0 +1,23 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+// DIDSet - Creates or updates a DID (Decentralized Identifier)
+// Reference: https://xrpl.org/didset.html
+message DIDSet {
+  // (Optional) DID document (hex)
+  string did_document = 1;
+
+  // (Optional) URI for the DID
+  string uri = 2;
+
+  // (Optional) Data field (hex)
+  string data = 3;
+}
+
+// DIDDelete - Deletes a DID
+// Reference: https://xrpl.org/diddelete.html
+message DIDDelete {
+  // No fields - deletes sender's DID
+}

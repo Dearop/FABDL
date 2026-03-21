@@ -1,0 +1,106 @@
+syntax = "proto3";
+package sf.xrpl.type.v1;
+
+option go_package = "github.com/xrpl-commons/firehose-xrpl/pb/sf/xrpl/type/v1;pbxrpl";
+
+import "sf/xrpl/type/v1/amount.proto";
+
+// NFTokenMint - Mints a new NFT
+// Reference: https://xrpl.org/nftokenmint.html
+message NFTokenMint {
+  // Taxon for this NFT (issuer-defined category)
+  uint32 nftoken_taxon = 1;
+
+  // (Optional) Issuer if minting on behalf of another
+  string issuer = 2;
+
+  // (Optional) Transfer fee (0-50000, representing 0-50%)
+  uint32 transfer_fee = 3;
+
+  // (Optional) URI pointing to token metadata (hex encoded, up to 256 bytes)
+  string uri = 4;
+
+  // (Optional) Amount expected or offered for the NFToken
+  Amount amount = 5;
+
+  // (Optional) Time after which the offer is no longer active
+  uint32 expiration = 6;
+
+  // (Optional) Account that may accept this offer
+  string destination = 7;
+
+  // (Optional) Transaction flags
+  // tfBurnable = 1 (0x00000001) - Allow issuer to destroy the NFToken
+  // tfOnlyXRP = 2 (0x00000002) - NFToken can only be bought/sold for XRP
+  // tfTrustLine = 4 (0x00000004) - DEPRECATED: Auto-create trust lines for fees
+  // tfTransferable = 8 (0x00000008) - NFToken can be transferred to others
+  // tfMutable = 16 (0x00000010) - URI can be updated via NFTokenModify
+  uint32 flags = 8;
+}
+
+// NFTokenBurn - Burns an existing NFT
+// Reference: https://xrpl.org/nftokenburn.html
+message NFTokenBurn {
+  // ID of the NFT to burn (64 hex chars)
+  string nftoken_id = 1;
+
+  // (Optional) Owner if burning on behalf of another
+  string owner = 2;
+}
+
+// NFTokenCreateOffer - Creates an offer to buy or sell an NFT
+// Reference: https://xrpl.org/nftokencreateoffer.html
+message NFTokenCreateOffer {
+  // ID of the NFT
+  string nftoken_id = 1;
+
+  // Amount offered (0 for free transfer)
+  Amount amount = 2;
+
+  // (Optional) For buy offers, the NFT owner
+  string owner = 3;
+
+  // (Optional) Specific account that can accept
+  string destination = 4;
+
+  // (Optional) Expiration time
+  uint32 expiration = 5;
+
+  // (Optional) Transaction flags
+  // tfSellNFToken = 1 (0x00000001) - If set indicate this is a sell offer.
+  uint32 flags = 6;
+}
+
+// NFTokenCancelOffer - Cancels NFT offers
+// Reference: https://xrpl.org/nftokencanceloffer.html
+message NFTokenCancelOffer {
+  // List of offer IDs to cancel
+  repeated string nftoken_offers = 1;
+}
+
+// NFTokenAcceptOffer - Accepts an NFT offer
+// Reference: https://xrpl.org/nftokenacceptoffer.html
+message NFTokenAcceptOffer {
+  // (Optional) Sell offer to accept
+  string nftoken_sell_offer = 1;
+
+  // (Optional) Buy offer to accept
+  string nftoken_buy_offer = 2;
+
+  // (Optional) Broker fee for brokered trades
+  Amount nftoken_broker_fee = 3;
+}
+
+// NFTokenModify - Modifies the URI of a dynamic NFT
+// Reference: https://xrpl.org/nftokenmodify.html
+message NFTokenModify {
+  // The unique identifier of the NFT to modify
+  string nftoken_id = 1;
+
+  // (Optional) Owner of the NFT (omit if Account is the owner)
+  string owner = 2;
+
+  // (Optional) New URI for the NFT (hex encoded, up to 256 bytes)
+  // If omitted, the existing URI is deleted
+  string uri = 3;
+}
