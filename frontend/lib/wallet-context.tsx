@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 import type { WalletInfo, AppStatus, Strategy } from './types'
+import { OtsuWallet } from './otsu-wallet'
 
 interface WalletContextType {
   wallet: WalletInfo | null
@@ -38,28 +39,29 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setError(null)
 
     try {
-      // For now, use a demo wallet address
-      // In production, this would connect to Otsu Wallet
-      const demoAddress = 'rN7n7otQDd6FczFgLdlqtyMVrn3NnrcVcN'
-      
-      // Call backend to verify wallet
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-      const response = await fetch(`${apiUrl}/wallet/connect`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ address: demoAddress, network: 'testnet' })
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to connect wallet')
+      if (!OtsuWallet.isInstalled()) {
+        throw new Error('Otsu Wallet extension not found. Please install it first.')
       }
 
-      const data = await response.json()
+      const otsu = new OtsuWallet()
+      const { address } = await otsu.connect({ scopes: ['read', 'sign', 'submit'] })
+
+      const networkInfo = await otsu.getNetwork()
+
+      // New accounts don't exist on-ledger until funded (XRPL base reserve = 10 XRP).
+      // getBalance() throws "Account not found" in that case — handle it gracefully.
+      let balance = '0 XRP (unfunded)'
+      try {
+        const balanceInfo = await otsu.getBalance()
+        balance = `${balanceInfo.available} XRP`
+      } catch {
+        // Account not yet funded — connection still valid
+      }
 
       setWallet({
-        address: data.wallet_id,
-        balance: data.balance,
-        network: data.network
+        address,
+        balance,
+        network: networkInfo.networkId,
       })
       setStatus('ready')
     } catch (err) {
@@ -69,6 +71,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const disconnectWallet = useCallback(() => {
+    if (OtsuWallet.isInstalled()) {
+      new OtsuWallet().disconnect().catch(() => {})
+    }
     setWallet(null)
     setStatus('disconnected')
     setStrategies([])
