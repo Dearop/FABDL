@@ -13,6 +13,9 @@ const COINGECKO_PRICE_URL: &str =
 const COINGECKO_HISTORY_URL_TEMPLATE: &str =
     "https://api.coingecko.com/api/v3/coins/ripple/market_chart?vs_currency=usd&interval=daily&days=";
 
+/// Fallback XRP/USD price used when CoinGecko is unavailable or rate-limiting.
+const XRP_USD_FALLBACK: f64 = 2.50;
+
 pub(super) async fn fetch_xrp_usd_price(
     http: &Client,
     _override_url: Option<&str>,
@@ -26,14 +29,27 @@ pub(super) async fn fetch_xrp_usd_price(
         usd: f64,
     }
 
-    let resp: CgPrice = http
-        .get(COINGECKO_PRICE_URL)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let result = async {
+        let resp: CgPrice = http
+            .get(COINGECKO_PRICE_URL)
+            .send()
+            .await?
+            .json()
+            .await?;
+        Ok::<f64, AnalysisError>(resp.ripple.usd)
+    }
+    .await;
 
-    Ok(resp.ripple.usd)
+    match result {
+        Ok(price) => {
+            tracing::info!(price, "XRP/USD price fetched from CoinGecko");
+            Ok(price)
+        }
+        Err(e) => {
+            tracing::warn!(error = %e, fallback = XRP_USD_FALLBACK, "CoinGecko unavailable — using fallback price");
+            Ok(XRP_USD_FALLBACK)
+        }
+    }
 }
 
 pub(super) async fn fetch_price_history(
@@ -48,7 +64,13 @@ pub(super) async fn fetch_price_history(
     }
 
     let url = format!("{COINGECKO_HISTORY_URL_TEMPLATE}{days}");
-    let resp: CgHistory = http.get(&url).send().await?.json().await?;
+    let resp: CgHistory = match http.get(&url).send().await?.json().await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = %e, "CoinGecko price history unavailable — returning empty history");
+            return Ok(vec![]);
+        }
+    };
 
     let points = resp
         .prices

@@ -102,6 +102,8 @@ pub struct AccountLinesResponse {
 #[derive(Debug, Deserialize, Clone)]
 pub struct TrustLine {
     pub currency: String,
+    /// XRPL returns this field as "account" (the counterparty address).
+    #[serde(rename = "account")]
     pub issuer: String,
     /// Positive = asset held, negative = liability.
     pub balance: String,

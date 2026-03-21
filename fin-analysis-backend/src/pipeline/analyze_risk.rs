@@ -31,10 +31,32 @@ pub async fn run(
         .as_deref()
         .ok_or(AnalysisError::MissingParameter("wallet_address"))?;
 
-    // Fetch LP token balances.
-    let lines = xrpl.account_lines(wallet).await?;
+    tracing::info!(wallet, "step 1: fetching account lines");
+    // Fetch LP token balances. A brand-new or unfunded account returns
+    // "Account not found" from the ledger — treat that as zero positions.
+    let lines = match xrpl.account_lines(wallet).await {
+        Ok(l) => {
+            tracing::info!(wallet, count = l.lines.len(), "account lines fetched");
+            l
+        }
+        Err(AnalysisError::XrplRpc(ref msg)) => {
+            tracing::warn!(wallet, error = %msg, "account not found on ledger — treating as empty portfolio");
+            use crate::types::xrpl::AccountLinesResponse;
+            AccountLinesResponse { lines: vec![], marker: None }
+        }
+        Err(e) => {
+            tracing::error!(wallet, error = %e, "account_lines failed");
+            return Err(e);
+        }
+    };
+
+    tracing::info!(wallet, "step 2: fetching XRP/USD price");
     let xrp_price = xrpl.xrp_usd_price().await?;
+    tracing::info!(xrp_price, "XRP/USD price fetched");
+
+    tracing::info!(wallet, "step 3: fetching 90-day price history");
     let price_history = xrpl.price_history(90).await.unwrap_or_default();
+    tracing::info!(days = price_history.len(), "price history fetched");
 
     // Determine which pools the wallet has positions in.
     // We attempt to build a snapshot for each known pool; skip on error
@@ -48,6 +70,8 @@ pub async fn run(
     } else {
         KNOWN_POOLS.to_vec()
     };
+
+    tracing::info!(wallet, pools = ?pools_to_check, "step 4: scanning pools for LP positions");
 
     for pool_label in pools_to_check {
         // Only query pools where the wallet holds LP tokens.
@@ -65,23 +89,33 @@ pub async fn run(
                 && l.currency.len() == 8 // LP tokens have 8-char hex currency codes
         });
 
+        tracing::debug!(pool = pool_label, has_lp, "pool LP check");
+
         // Always attempt the pool if the wallet was specified with a specific pool,
         // or if we found LP tokens (rough heuristic for portfolio mode).
         if pool_label_filter.is_some() || has_lp {
+            tracing::info!(pool = pool_label, wallet, "fetching pool snapshot");
             match xrpl.fetch_pool_snapshot(wallet, pool_label).await {
                 Ok(mut snapshot) => {
+                    tracing::info!(pool = pool_label, positions = snapshot.positions.len(), "pool snapshot fetched");
                     if !snapshot.positions.is_empty() {
                         snapshot.price_history = price_history.clone();
                         snapshots.push(snapshot);
                     }
                 }
-                Err(_) => continue, // pool not found or no position → skip
+                Err(e) => {
+                    tracing::warn!(pool = pool_label, error = %e, "pool snapshot failed — skipping");
+                    continue;
+                }
             }
         }
         let _ = currency1; // suppress unused warning
     }
 
+    tracing::info!(wallet, snapshots = snapshots.len(), "step 5: running quant model");
+
     if snapshots.is_empty() {
+        tracing::info!(wallet, "no AMM positions found — returning empty portfolio summary");
         return Ok(PortfolioRiskSummary::empty(xrp_price));
     }
 
