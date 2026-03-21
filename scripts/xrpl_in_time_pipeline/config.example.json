@@ -1,8 +1,9 @@
 {
+  "rpc_url": "https://s1.ripple.com:51234/",
   "target_pool_count": 5,
   "top_lp_holders_per_pool": 5,
   "replay_window_secs": 21600,
   "strict_pool_count": false,
-  "pool_selection_mode": "recent_activity",
+  "pool_selection_mode": "discover",
   "pools": []
 }
