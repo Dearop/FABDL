@@ -1,0 +1,11 @@
+
+======================================================================
+Query: Calculate the risk and impermanent loss for 3212 ETH and 3333 USDC results.txt
+======================================================================
+Action:     analyze_risk
+Scope:      portfolio
+Confidence: 95%
+Valid:      True
+Parameters:
+  - parameters: {'assets': ['3212 ETH', '3333 USDC']}
+======================================================================

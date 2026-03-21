@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package intentrouter;
+
+option go_package = "github.com/ajhavlin/BSA-Hackathon/llm-orchestration/proto";
+
+message Parameter {
+  string key = 1;
+  string value = 2;
+}
+
+message IntentRequest {
+  string user_query = 1;
+  int64 timestamp = 2;
+}
+
+message IntentResponse {
+  string action = 1;           // analyze_risk | execute_strategy | check_position | get_price
+  string scope = 2;            // portfolio | specific_asset | specific_pool
+  repeated Parameter parameters = 3;
+  float confidence = 4;         // 0.0 to 1.0
+  bool is_valid = 5;
+}
+
+service IntentRouter {
+  rpc ClassifyIntent(IntentRequest) returns (IntentResponse);
+}
