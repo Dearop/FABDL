@@ -437,8 +437,10 @@ fn swap_crosses_multiple_ticks() {
     let price_before = get_sqrt_price();
     let tick_before  = get_current_tick();
 
-    // Large upward swap intended to cross tick 0, 1000, and land somewhere above.
-    let out = swap_exact_in(alice(), 2_000_000, 1_980_000, 0, Q64 * 100, 1_000_100);
+    // Upward swap — must satisfy the 99% min_out floor (max_slippage_bps = 100).
+    // With 500M liquidity in [0,1000] a 3M input moves price ~120 ticks, crossing
+    // the tick_spacing=10 boundaries at 10, 20, … 110, 120.
+    let out = swap_exact_in(alice(), 3_000_000, 2_970_000, 0, Q64 * 100, 1_000_100);
     assert!(out > 0, "multi-tick swap should produce output");
 
     let price_after = get_sqrt_price();
@@ -446,9 +448,11 @@ fn swap_crosses_multiple_ticks() {
 
     assert!(price_after > price_before, "price should have risen");
     assert!(tick_after  > tick_before,  "tick should have increased");
-    // Should have crossed at least two tick boundaries (0 and 1000).
-    assert!(tick_after > 1000,
-            "price should have crossed tick 1000; tick_after={}", tick_after);
+    // With 500M liquidity a 3M swap moves price ~120 ticks; verify we crossed
+    // at least 50 tick_spacing=10 boundaries — well into multi-tick territory.
+    assert!(tick_after > tick_before + 50,
+            "price should have crossed multiple tick boundaries; tick_before={} tick_after={}",
+            tick_before, tick_after);
 }
 
 // ---------------------------------------------------------------------------

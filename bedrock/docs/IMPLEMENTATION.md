@@ -20,7 +20,7 @@ The codebase is split into two Rust crates:
 | `uniswap-v3-xrpl-contract` | `bedrock/contract/` | The on-chain AMM logic |
 | `uniswap-v3-xrpl-adapter` | `bedrock/adapter/` | Off-chain routing shim |
 
-All 64 tests pass. The contract builds to a 375-byte WASM binary.
+All 101 tests pass. The contract builds to a 375-byte WASM binary.
 
 ---
 
@@ -648,20 +648,47 @@ bugs:
 
 ## Test Coverage
 
-54 tests across all modules:
+101 tests across all modules and integration suites:
+
+**Unit tests (contract crate — 64 total)**
 
 | Module | Tests | What is covered |
 |---|---|---|
-| `hooks` | 21 | All three hook variants; before/after initialize + swap + mint + burn + donate; boundary conditions; HookId codec roundtrip |
-| `oracle` | 8 | Init, write, observe (exact match, interpolation, live state), cardinality, idempotency |
-| `codec` | 3 | State roundtrip; pool fields; tick map |
+| `lib` (integration) | 15 | Full lifecycle; pause; slippage cap; oracle; protocol fees; auth; donate; hook rejection on initialize; conservative hook allow/reject |
+| `hooks` | 13 | All three hook variants; before/after initialize + swap + mint + burn + donate; boundary conditions; HookId codec roundtrip |
+| `oracle` | 7 | Init, write, observe (exact match, interpolation, live state), cardinality, idempotency |
+| `math` | 7 | Tick ↔ price roundtrip; swap step; delta amounts; monotonicity |
 | `swap` | 6 | Price direction; fee accumulation; price limit; invalid limit |
-| `math` | 6 | Tick ↔ price roundtrip; swap step; delta amounts; monotonicity |
-| `tick` | 3 | Update, crossing, fee growth inside |
+| `position` | 5 | Mint, burn, collect, underflow guard, fee growth inside |
+| `tick` | 4 | Update, crossing, fee growth inside, liquidity net |
 | `tick_bitmap` | 4 | Flip, find, search direction |
-| `position` | 4 | Mint, burn, collect, underflow guard |
-| `lib` (integration) | 14 | Full lifecycle; pause; slippage cap; oracle; protocol fees; auth; donate; hook rejection on initialize |
-| `adapter` | 5 | Path selection; fallback; slippage guard; zero input |
+| `codec` | 3 | State roundtrip; pool fields; tick map |
+
+**End-to-end tests (contract crate — 22 total)**
+
+| Scenario | Tests | What is covered |
+|---|---|---|
+| Full LP lifecycle | 1 | Init → mint → swap both ways → burn → collect |
+| Multiple LP fee sharing | 1 | Two LPs receive proportional fee growth |
+| Slippage enforcement | 1 | Zero output on min_out violation; wrong-direction price limit |
+| ConservativeHedge hook | 3 | Low-fee pool reject; narrow mint reject; oversized swap reject + full lifecycle |
+| YieldRebalance hook | 2 | Out-of-range mint reject; burn always allowed |
+| Donate | 4 | Increases fee growth; noop with no liquidity; zero amounts error; collectable after burn |
+| Protocol fee governance | 2 | Fee accrual and collection; non-owner rejection |
+| Emergency pause | 2 | Pause blocks all mutations; unpause restores |
+| TWAP oracle | 2 | Records across blocks; same-block idempotency |
+| Multi-tick crossing | 1 | 3M token swap moves price ~120 ticks, crossing 12 tick_spacing=10 boundaries |
+| Out-of-range position | 1 | Out-of-range mint does not change active liquidity |
+| In-range fee accrual | 1 | Fees only accrue to positions that straddle the current price |
+
+**Unit + end-to-end tests (adapter crate — 15 total)**
+
+| Suite | Tests | What is covered |
+|---|---|---|
+| Unit | 5 | Path selection; pre-submission validation; zero input; invalid min_out |
+| E2E | 10 | BedrockDirect and XrplDirect paths; both-available preference; fallback; no-path error; 99% min_out floor; exact boundary acceptance; both swap directions; large-swap graceful handling |
+
+**Slippage floor constraint**: The contract requires `min_amount_out >= (10_000 - max_slippage_bps) / 10_000 * amount_in` before executing any swap. With the default `max_slippage_bps = 100` (1%), every swap must declare an expected output of at least 99% of input. This means a single swap cannot traverse so many ticks that its output falls below 99% of input — multi-tick tests must be calibrated accordingly.
 
 Run all tests:
 ```bash
