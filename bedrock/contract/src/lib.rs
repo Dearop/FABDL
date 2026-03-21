@@ -864,6 +864,14 @@ pub fn get_protocol_fees() -> (u128, u128) {
     with_state(|s| (s.pool.protocol_fees_0, s.pool.protocol_fees_1))
 }
 
+pub fn get_current_tick() -> i32 {
+    with_state(|s| s.pool.current_tick)
+}
+
+pub fn get_fee_growth_global() -> (u128, u128) {
+    with_state(|s| (s.pool.fee_growth_global_0_q128, s.pool.fee_growth_global_1_q128))
+}
+
 // ---------------------------------------------------------------------------
 // Integration tests
 // ---------------------------------------------------------------------------

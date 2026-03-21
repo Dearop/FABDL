@@ -4,6 +4,6 @@
   "top_lp_holders_per_pool": 10,
   "replay_window_secs": 3600,
   "strict_pool_count": true,
-  "pool_selection_mode": "discover",
+  "pool_selection_mode": "recent_activity",
   "pools": []
 }

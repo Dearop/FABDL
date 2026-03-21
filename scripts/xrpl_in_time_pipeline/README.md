@@ -44,7 +44,8 @@ python3 scripts/xrpl_in_time_pipeline/pipeline.py seed-spec \
 
 - This pipeline uses XRPL JSON-RPC now and is designed to be Firehose-compatible later.
 - `pool_selection_mode`:
-  - `"discover"`: scan `ledger_data` AMM objects and auto-select top pools
+  - `"recent_activity"`: scan only recent ledgers in `replay_window_secs`, discover active AMMs from metadata (fastest)
+  - `"discover"`: scan `ledger_data` AMM objects and auto-select top pools (heavier)
   - `"configured"`: use explicit `pools` from config
 - If `strict_pool_count` is true, it enforces exactly `target_pool_count` selected pools.
 - Holder extraction uses `account_lines` on the AMM account and ranks by LP trustline balance.

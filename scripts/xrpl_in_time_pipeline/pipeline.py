@@ -216,6 +216,85 @@ def discover_pools_from_ledger(rpc: XRPLRPC, snapshot_ledger: int, target_pool_c
     return top
 
 
+def _extract_tx_json(raw_tx: Dict[str, Any]) -> Dict[str, Any]:
+    return raw_tx.get("tx_json", raw_tx)
+
+
+def discover_pools_from_recent_activity(
+    rpc: XRPLRPC, snapshot_ledger: int, target_pool_count: int, replay_window_secs: int
+) -> List[Dict[str, Any]]:
+    """
+    Fast discovery path:
+    - Scan only recent ledgers in the replay window
+    - Collect AMM accounts touched by AMM tx types
+    - Pull amm_info by amm_account
+    """
+    now_unix = int(time.time())
+    cutoff = now_unix - replay_window_secs
+    current = snapshot_ledger
+    amm_accounts: set = set()
+
+    while current > 0:
+        result = rpc.ledger_with_transactions(current)
+        ledger = result.get("ledger", {})
+        close_unix = xrpl_close_to_unix(int(ledger.get("close_time", 0)))
+        if close_unix < cutoff:
+            break
+
+        for raw in ledger.get("transactions", []):
+            tx = _extract_tx_json(raw)
+            tx_type = tx.get("TransactionType")
+            if tx_type not in AMM_TX_TYPES:
+                continue
+            # Most AMM txs include Account as the sender (not AMM account),
+            # so we rely on metadata AffectedNodes to find AMM ledger entries.
+            meta = raw.get("meta", {})
+            affected = meta.get("AffectedNodes", [])
+            for node in affected:
+                created = node.get("CreatedNode", {})
+                modified = node.get("ModifiedNode", {})
+                deleted = node.get("DeletedNode", {})
+                for obj in (created, modified, deleted):
+                    if obj.get("LedgerEntryType") != "AMM":
+                        continue
+                    fields = obj.get("FinalFields") or obj.get("NewFields") or {}
+                    acct = fields.get("Account")
+                    if acct:
+                        amm_accounts.add(acct)
+        current -= 1
+
+    discovered: List[Tuple[float, Dict[str, Any]]] = []
+    for amm_account in amm_accounts:
+        try:
+            info = rpc.amm_info_by_account(amm_account, snapshot_ledger)
+        except Exception:
+            continue
+        amm = info.get("amm", {})
+        if not amm:
+            continue
+        amount = amm.get("amount")
+        amount2 = amm.get("amount2")
+        asset_0 = parse_asset_from_xrpl_obj({"currency": "XRP"} if isinstance(amount, str) else amount)
+        asset_1 = parse_asset_from_xrpl_obj({"currency": "XRP"} if isinstance(amount2, str) else amount2)
+        lp_score = _parse_floatish(amm.get("lp_token"))
+        reserve_score = _parse_floatish(amount) + _parse_floatish(amount2)
+        score = lp_score if lp_score > 0 else reserve_score
+        discovered.append(
+            (
+                score,
+                {
+                    "name": f"{asset_0.key()}-{asset_1.key()}",
+                    "asset_0": {"kind": asset_0.kind, "currency": asset_0.currency, "issuer": asset_0.issuer},
+                    "asset_1": {"kind": asset_1.kind, "currency": asset_1.currency, "issuer": asset_1.issuer},
+                    "amm_account": amm_account,
+                },
+            )
+        )
+
+    discovered.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in discovered[:target_pool_count]]
+
+
 def amount_to_asset_key(value: Any) -> Optional[str]:
     if isinstance(value, str):
         return "XRP"
@@ -267,6 +346,13 @@ def run_snapshot(config_path: Path, out_path: Path) -> None:
     mode = str(cfg.get("pool_selection_mode", "configured")).lower()
     if mode == "discover":
         configured_pools = discover_pools_from_ledger(rpc, snapshot_ledger, target_pool_count)
+    elif mode == "recent_activity":
+        configured_pools = discover_pools_from_recent_activity(
+            rpc,
+            snapshot_ledger,
+            target_pool_count,
+            int(cfg.get("replay_window_secs", 3600)),
+        )
     else:
         configured_pools = cfg.get("pools", [])
         if len(configured_pools) == 0:
