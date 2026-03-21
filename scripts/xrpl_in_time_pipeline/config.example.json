@@ -3,7 +3,7 @@
   "target_pool_count": 25,
   "top_lp_holders_per_pool": 10,
   "replay_window_secs": 3600,
-  "strict_pool_count": true,
+  "strict_pool_count": false,
   "pool_selection_mode": "configured",
   "pools": [
     {

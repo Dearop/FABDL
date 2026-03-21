@@ -390,6 +390,182 @@ without a global length prefix.
 
 ---
 
+## Uniswap v4: Proximity and Impossibility
+
+### Feature Comparison
+
+| v4 Feature | Our Implementation | Status |
+|---|---|---|
+| Concentrated liquidity (v3 core) | Full implementation | ✅ Complete |
+| Tick bitmap O(1) next-tick search | Full implementation | ✅ Complete |
+| Fee growth accumulators per tick | Full implementation | ✅ Complete |
+| TWAP oracle ring buffer | Full implementation | ✅ Complete |
+| Protocol fee governance | Full implementation | ✅ Complete |
+| Pause / emergency stop | Full implementation | ✅ Complete |
+| before/after swap hooks | Internal implementation | ⚠️ Partial (internal only) |
+| before/after add liquidity | Internal implementation | ⚠️ Partial (internal only) |
+| before/after remove liquidity | Internal implementation | ⚠️ Partial (internal only) |
+| before/after initialize hooks | Not implemented | ❌ Missing |
+| before/after donate hooks | Not implemented | ❌ Missing |
+| Hook as external contract | Impossible | 🚫 See below |
+| Hook address encodes active flags | Impossible | 🚫 See below |
+| Dynamic fees (hook overrides fee) | Impossible | 🚫 See below |
+| Singleton PoolManager (all pools) | Impossible | 🚫 See below |
+| Flash accounting / delta settlement | Impossible | 🚫 See below |
+| Transient storage (EIP-1153) | Impossible | 🚫 See below |
+| ERC-6909 multi-token claims | Impossible | 🚫 See below |
+| `unlock` / callback settlement pattern | Impossible | 🚫 See below |
+| `donate` to in-range LPs | Not implemented | ❌ Missing (but buildable) |
+| Native ETH / gas token handling | Not applicable | — XRPL uses XRP natively |
+
+**Summary**: we have all of Uniswap v3, partial v4 hooks (internal only), and
+none of v4's core architectural changes. The gap is not a matter of missing
+code — it is a matter of the execution environment lacking the primitives v4
+was designed around.
+
+---
+
+### Why Full v4 Is Impossible Here
+
+Uniswap v4 is not an extension of v3. It is a ground-up redesign built on
+four EVM-specific primitives that do not exist on XRPL or Bedrock.
+
+#### 1. External Hooks Require Cross-Contract Calls
+
+This is the single largest blocker. In v4, a hook is a separate contract
+deployed at a specific address. When a swap fires, the PoolManager calls
+`hook.beforeSwap(...)` and `hook.afterSwap(...)` — two external EVM calls to
+a contract written by the hook author and deployed independently.
+
+Our hook system has the same lifecycle shape but the wrong execution model:
+all hook logic is compiled into the same WASM binary. A third party cannot
+deploy their own hook. Two pools cannot share a hook contract. A hook cannot
+call into another pool.
+
+The execution environment makes this impossible:
+
+- **Bedrock**: cross-contract calls are undocumented. The BEDROCK.md in this
+  project explicitly describes Bedrock as a "placeholder name" whose existence
+  is unverified. No call instruction for invoking another contract exists in
+  the current toolchain.
+- **XRPL Hooks (XLS-38d)**: the native XRPL smart-contract layer. Hooks are
+  C programs triggered by ledger events. There is no mechanism for one hook to
+  call another, and no Rust support.
+- **Consequence**: every hook implementation must be baked into the binary at
+  compile time. This means no permissionless composability — the defining
+  property of v4 hooks.
+
+#### 2. Hook Addresses Encode Capability Flags
+
+In v4, the PoolManager checks which lifecycle callbacks are active by
+inspecting specific bits in the hook contract's address:
+
+```
+bit 13 = BEFORE_SWAP
+bit 12 = AFTER_SWAP
+bit 11 = BEFORE_ADD_LIQUIDITY
+...
+```
+
+A hook contract must be deployed at an address where these bits match the
+methods it actually implements. This is achieved with EVM CREATE2 (deploying
+a contract to a deterministic address derived from the deployer's choice of
+salt). The PoolManager reads these bits on every swap to decide which calls
+to make, saving gas by skipping unneeded callbacks.
+
+XRPL has no CREATE2. Addresses are derived from account seeds, not
+constructor parameters. There is no mechanism to mine an address with specific
+bit patterns. The entire "hook flags in address" design is EVM-specific.
+
+In our implementation `HookId` is a plain enum stored as 1 byte in config.
+This works but it means:
+- Hooks are not composable (you cannot combine two hooks on one pool)
+- The flag system is a closed registry, not an open standard
+
+#### 3. Flash Accounting Requires Transient Storage (EIP-1153)
+
+Uniswap v4's most important gas optimisation is flash accounting. Instead of
+moving tokens in and out on every swap step, the PoolManager tracks net
+*deltas* (credits and debits) for each token across the entire transaction.
+Tokens only actually move once, at the end, when `settle` is called.
+
+This is only safe because of EIP-1153 transient storage: storage slots that
+persist for the duration of one transaction and are then automatically zeroed.
+The unsettled delta is stored transiently. If the caller's callback does not
+bring all deltas to zero before the transaction ends, it reverts.
+
+XRPL has no transient storage. Contract state on XRPL persists across
+transactions — there is no "end of transaction" hook that can enforce
+settlement. Without a safe way to track unsettled deltas, flash accounting
+cannot be implemented correctly: either the contract trusts callers to settle
+(unsafe), or it forces settlement after every operation (losing the gas
+benefit and breaking the entire composability model).
+
+#### 4. Singleton PoolManager Cannot Share State Across Contracts
+
+In v4, all pools live in a single PoolManager contract. This is what makes
+flash accounting useful: you can swap across pool A and pool B in one
+transaction, and only pay gas for two token transfers at the very end instead
+of four in the middle.
+
+On any platform that compiles each contract to a separate WASM binary, there
+is no "singleton". Two separate deployments of the contract cannot share the
+delta accounting state needed for cross-pool flash transactions.
+
+Even if Bedrock supported cross-contract calls, the flash accounting state
+would need to span multiple contracts, which requires transient storage to be
+safe — collapsing back to blocker 3.
+
+#### 5. ERC-6909 Multi-Token Claims
+
+v4 uses ERC-6909 (a single contract holding balances for many token types)
+for internal position and fee accounting. This lets the PoolManager act as
+both AMM and token ledger, which removes the need for individual ERC-20
+transfers on every operation.
+
+XRPL has its own multi-token model: native XRP, issued currencies (IOU), and
+AMM LP tokens. These are first-class ledger objects, not EVM contracts. There
+is no concept of a contract holding claims on behalf of users the way ERC-6909
+works. Implementing ERC-6909 semantics on XRPL would require off-ledger
+accounting that the ledger itself cannot enforce, undermining the trust model.
+
+---
+
+### What Would Actually Be Required
+
+To build a genuine Uniswap v4 on XRPL, five things would need to exist:
+
+| Requirement | Closest XRPL option | Gap |
+|---|---|---|
+| Cross-contract calls | Flare Network (EVM bridge) | Different L1 entirely |
+| Transient storage | None | No EIP-1153 equivalent |
+| Deterministic contract addresses | None | No CREATE2 |
+| Shared singleton state | None | No cross-binary state |
+| ERC-6909 multi-token | XRPL issued currencies (partial) | Different model, not composable |
+
+The realistic path to v4 features on XRPL is **Flare Network**: an
+EVM-compatible chain with an XRPL state connector bridge. A Uniswap v4 fork
+could run natively on Flare EVM and use the bridge to read XRPL AMM prices.
+This is a different product, not an extension of this contract.
+
+---
+
+### What We Actually Have vs. What v4 Gives You
+
+Our internal hook system delivers the practical outcome for this project:
+pools enforce strategy rules on-chain, and new hook behaviours can be added
+by implementing a trait. What it cannot deliver is permissionless
+composability — the ability for any developer to write and deploy a hook
+contract that interacts with the pool without modifying or recompiling the
+binary.
+
+For a hackathon project with three known strategies (Conservative Hedge,
+Yield Rebalance, Do Nothing), internal hooks are sufficient. For a
+production DEX where third parties build on top of the hook system, the
+cross-contract call limitation is a hard ceiling.
+
+---
+
 ## Explicit Limitations
 
 The following are deliberate limitations of the current implementation, not
