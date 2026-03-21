@@ -165,15 +165,21 @@ User: {user_query}
         Returns:
             IntentResponse with classified intent
         """
+        print(f"\n{'='*60}")
+        print(f"📨 [Intent Router] Received query: '{request.user_query}'")
+        print(f"{'='*60}")
+        
         logger.info(f"Received query: {request.user_query}")
         
         # Build prompt with user query
         prompt = self.prompt_template.format(user_query=request.user_query)
         
         # Call local LLM
+        print(f"🧠 [Intent Router] Calling local LLM (Ollama)...")
         llm_output = self._call_local_llm(prompt)
         
         if not llm_output:
+            print(f"❌ [Intent Router] LLM inference returned None")
             logger.warning("LLM inference returned None")
             return intent_router_pb2.IntentResponse(
                 action="error",
@@ -182,10 +188,14 @@ User: {user_query}
                 confidence=0.0
             )
         
+        print(f"📝 [Intent Router] LLM output:\n{llm_output}\n")
+        
         # Parse and validate response
+        print(f"🔍 [Intent Router] Parsing response...")
         parsed = self._parse_intent_response(llm_output)
         
         if not parsed:
+            print(f"❌ [Intent Router] Failed to parse intent response")
             logger.warning("Failed to parse intent response")
             return intent_router_pb2.IntentResponse(
                 action="error",
@@ -193,6 +203,12 @@ User: {user_query}
                 is_valid=False,
                 confidence=0.0
             )
+        
+        print(f"✅ [Intent Router] Successfully classified:")
+        print(f"   Action: {parsed.get('action')}")
+        print(f"   Scope: {parsed.get('scope')}")
+        print(f"   Confidence: {parsed.get('confidence')}")
+        print(f"\n✅ [Intent Router] Returning response to Backend\n")
         
         # Convert parameters dict to repeated Parameter message
         parameters = [
