@@ -3,6 +3,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
 
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::BTreeMap;
+
 use crate::types::ContractError;
 
 #[derive(Clone, Copy, Default)]
@@ -23,10 +28,8 @@ pub struct TickState {
     pub seconds_per_liquidity_outside_q128: u128,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct TickMap(pub BTreeMap<i32, TickState>);
 
-#[cfg(not(target_arch = "wasm32"))]
 impl TickMap {
     pub fn new() -> Self {
         Self(BTreeMap::new())

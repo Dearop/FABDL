@@ -131,6 +131,28 @@ pub fn execute_swap(
             sqrt_price_next_tick.min(sqrt_price_limit)
         };
 
+        // If the bitmap returned an uninitialized word boundary that equals the
+        // current price (e.g. we're at the leftmost bit of a word with no tick
+        // below), advance the tick position one spacing into the next word so
+        // that the next iteration searches the adjacent word.
+        if !initialized && sqrt_price_target == state.sqrt_price {
+            state.tick = if zero_for_one {
+                next_tick_clamped - tick_spacing
+            } else {
+                next_tick_clamped + tick_spacing
+            };
+            ticks_crossed += 1; // count this as a step to bound iterations
+            if ticks_crossed >= MAX_TICK_CROSSINGS {
+                break;
+            }
+            continue;
+        }
+
+        // Hard stop: if price genuinely can't move (same target, initialized tick).
+        if sqrt_price_target == state.sqrt_price {
+            break;
+        }
+
         // 2. Compute one step.
         let (sqrt_price_after, amount_in_step, amount_out_step, fee_amount) =
             compute_swap_step(
@@ -142,8 +164,15 @@ pub fn execute_swap(
                 zero_for_one,
             );
 
+        // If nothing was consumed (e.g. zero liquidity in this range), stop.
+        if amount_in_step == 0 && fee_amount == 0 {
+            break;
+        }
+
         // Deduct used input.
-        state.amount_remaining = state.amount_remaining.saturating_sub(amount_in_step + fee_amount);
+        state.amount_remaining = state
+            .amount_remaining
+            .saturating_sub(amount_in_step.saturating_add(fee_amount));
         state.amount_out = state.amount_out.saturating_add(amount_out_step);
         state.sqrt_price = sqrt_price_after;
 

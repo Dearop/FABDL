@@ -3,12 +3,14 @@
 /// Tick space is partitioned into "words" of 256 bits.
 /// word_pos  = tick / 256  (signed integer)
 /// bit_pos   = (tick % 256 + 256) % 256  (always 0..255)
-///
-/// On native (std) builds we use a BTreeMap<i16, u256_emulated>.
-/// On WASM builds the host storage API replaces the map.
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
+
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::BTreeMap;
 
 /// A single 256-bit word stored as four u64 limbs, little-endian.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
@@ -64,12 +66,10 @@ impl Word256 {
 // TickBitmap
 // ---------------------------------------------------------------------------
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct TickBitmap {
     words: BTreeMap<i16, Word256>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl TickBitmap {
     pub fn new() -> Self {
         Self {

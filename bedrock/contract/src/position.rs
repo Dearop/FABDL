@@ -3,6 +3,11 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
 
+#[cfg(target_arch = "wasm32")]
+extern crate alloc;
+#[cfg(target_arch = "wasm32")]
+use alloc::collections::BTreeMap;
+
 use crate::types::{AccountId, ContractError};
 
 /// Key identifying a unique LP position.
@@ -13,7 +18,7 @@ pub struct PositionKey {
     pub upper_tick: i32,
 }
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug)]
 pub struct PositionState {
     pub liquidity: u128,
     /// Last-checkpointed fee growth inside the range (token0), Q128.
@@ -26,10 +31,8 @@ pub struct PositionState {
     pub tokens_owed_1: u128,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct PositionMap(BTreeMap<PositionKey, PositionState>);
 
-#[cfg(not(target_arch = "wasm32"))]
 impl PositionMap {
     pub fn new() -> Self {
         Self(BTreeMap::new())

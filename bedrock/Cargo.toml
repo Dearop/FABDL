@@ -1,3 +1,8 @@
 [workspace]
-members = ["contract", "adapter"]
+members = [
+    "contract",
+    "adapter",
+    "xrpl-wasm-macros-stub",
+    "xrpl-wasm-std-stub",
+]
 resolver = "2"

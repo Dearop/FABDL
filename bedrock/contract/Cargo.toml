@@ -6,12 +6,11 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib", "rlib"]
 
-# WASM-only: Bedrock host bindings (not needed for native test builds)
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-xrpl-wasm-macros = { git = "https://github.com/xrpl-commons/xrpl-wasm" }
-xrpl-wasm-std    = { git = "https://github.com/xrpl-commons/xrpl-wasm" }
-
-[dev-dependencies]
+[dependencies]
+# Local stubs used for native/test builds.
+# `bedrock build` replaces these with the real xrpl-commons crates at WASM compile time.
+xrpl-wasm-macros = { path = "../xrpl-wasm-macros-stub" }
+xrpl-wasm-std    = { path = "../xrpl-wasm-std-stub" }
 
 [profile.release]
 opt-level = "z"

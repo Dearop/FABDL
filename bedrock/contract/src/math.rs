@@ -16,11 +16,6 @@ pub const Q64: u128 = 1u128 << 64;
 pub const MIN_TICK: i32 = -887_272;
 pub const MAX_TICK: i32 = 887_272;
 
-/// log(1.0001) base 2 as Q64.64 — used for tick↔sqrtPrice conversion.
-/// ln(1.0001) / ln(2) ≈ 0.000144269504
-const LOG2_1_0001_Q64: u128 = 2_661_026; // ≈ 0.000144269504 * 2^64 / 2^64... simplified
-// We use integer Newton's method below instead of log2 for determinism.
-
 // ---------------------------------------------------------------------------
 // Overflow-safe multiply-shift helpers
 // ---------------------------------------------------------------------------
@@ -71,51 +66,43 @@ pub fn div_q64(a: u128, b: u128) -> u128 {
 /// Returns sqrt_price_q64_64 for a given tick using the identity:
 ///   sqrt(1.0001^tick) stored in Q64.64.
 ///
-/// We implement this via repeated squaring (exact for integer ticks).
-/// Matches Uniswap v3 TickMath.getSqrtRatioAtTick behaviour for XRPL scale.
+/// Algorithm (same as Uniswap v3 TickMath, adapted to Q64.64):
+///   1. Compute MAGIC[0] = floor(sqrt(1.0001) * 2^64).
+///   2. MAGIC[k] = floor(sqrt(1.0001^(2^k)) * 2^64) = mul_shift64(MAGIC[k-1], MAGIC[k-1]).
+///   3. ratio = product of MAGIC[k] for bits k set in |tick|, starting from 1.0 (Q64).
+///   4. If tick < 0: invert via 2^128 / ratio.
 pub fn sqrt_price_at_tick(tick: i32) -> u128 {
     let abs_tick = tick.unsigned_abs();
 
-    // Precomputed sqrt(1.0001)^(2^k) in Q64.64 for k = 0..19.
-    // Each constant = floor(sqrt(1.0001^(2^k)) * 2^64).
-    // Generated from Python: int(math.sqrt(1.0001**(2**k)) * 2**64)
-    const MAGIC: [u128; 20] = [
-        18_446_744_073_709_551_616,  // k=0:  sqrt(1.0001^1)   ≈ 1.00005
-        18_447_644_030_898_041_173,  // k=1:  sqrt(1.0001^2)
-        18_451_343_320_387_934_843,  // k=2
-        18_458_741_523_888_200_463,  // k=3
-        18_473_537_938_426_723_064,  // k=4
-        18_503_129_578_415_288_899,  // k=5
-        18_562_328_946_700_612_463,  // k=6
-        18_680_829_896_028_975_036,  // k=7
-        18_919_601_047_938_659_920,  // k=8
-        19_405_916_734_768_476_949,  // k=9
-        20_417_826_302_598_839_153,  // k=10
-        22_622_344_047_634_723_761,  // k=11
-        27_771_743_798_622_898_938,  // k=12
-        41_902_982_929_665_698_483,  // k=13
-        95_515_808_555_631_680_593,  // k=14
-        496_158_534_555_219_985_516, // k=15 (overflows u128 — use saturating)
-        0, 0, 0, 0,                  // k=16-19: overflow region, unused in practice
-    ];
+    // MAGIC[0] = floor(sqrt(1.0001) * 2^64).
+    // Derived from Uniswap v3 inverse constant: floor(2^128 / MAGIC_INV_Q128[0]) >> 64
+    // where MAGIC_INV_Q128[0] = 0xfffcb933bd6fad37aa2d162d1a594001.
+    // Equivalently: floor(1.0000499987500625 * 2^64).
+    const MAGIC_0: u128 = 18_447_666_411_007_353_954;
 
-    let mut ratio: u128 = Q64; // start at 1.0 in Q64.64
+    // Build the rest by squaring (MAGIC[k] = MAGIC[k-1]^2 / 2^64).
+    let mut magic = [0u128; 20];
+    magic[0] = MAGIC_0;
+    for k in 1..20usize {
+        magic[k] = mul_shift64(magic[k - 1], magic[k - 1]);
+        if magic[k] == 0 {
+            // Overflow region — price is astronomical, cap and stop.
+            for j in k..20 { magic[j] = u128::MAX; }
+            break;
+        }
+    }
 
+    let mut ratio: u128 = Q64; // 1.0 in Q64.64
     for k in 0..20u32 {
         if abs_tick & (1u32 << k) != 0 {
-            let m = MAGIC[k as usize];
-            if m == 0 {
-                // overflow region
-                ratio = ratio.saturating_mul(u128::MAX >> 64);
-            } else {
-                ratio = mul_shift64(ratio, m);
-            }
+            ratio = mul_shift64(ratio, magic[k as usize]);
         }
     }
 
     if tick < 0 {
-        // invert: 1/ratio in Q64.64 = (2^128) / ratio, then >> 64
-        ratio = u128::MAX / ratio;
+        // Invert: 1/ratio in Q64.64 = 2^128 / ratio.
+        // Approximated as u128::MAX / ratio (error < 1 ULP, negligible).
+        ratio = if ratio == 0 { u128::MAX } else { u128::MAX / ratio };
     }
 
     ratio
@@ -159,12 +146,7 @@ pub fn amount0_delta(
         return 0;
     }
     let diff = sqrt_upper.saturating_sub(sqrt_lower); // Q64.64
-    // numerator = L * diff  (in Q64.64 * plain = Q64.64-scaled)
-    // denominator = sqrt_upper * sqrt_lower  (Q128.128, need >> 64)
-    let num = mul_shift64(liquidity << 0, diff); // liquidity * diff >> 0? No.
-    // Actually: amount0 = (liquidity * (sqrt_upper - sqrt_lower)) / (sqrt_upper * sqrt_lower / Q64)
-    // = (liquidity * diff * Q64) / (sqrt_upper * sqrt_lower)
-    // To avoid overflow, compute div step-by-step.
+    // amount0 = liquidity * (sqrt_upper - sqrt_lower) / (sqrt_upper * sqrt_lower / Q64)
     let denom = mul_shift64(sqrt_upper, sqrt_lower); // Q64.64 * Q64.64 >> 64 = Q64.64
     if denom == 0 {
         return 0;
@@ -256,22 +238,20 @@ pub fn compute_swap_step(
 
     let reached_target = sqrt_price_next == sqrt_price_target;
 
-    // Compute actual amounts for the step.
-    let (amount_in, amount_out) = if zero_for_one {
-        let a0 = amount0_delta(sqrt_price_next, sqrt_price_current, liquidity, true);
-        let a1 = amount1_delta(sqrt_price_next, sqrt_price_current, liquidity, false);
+    // Compute actual amounts for the step (clamp to u64 max).
+    let (amount_in, amount_out): (u64, u64) = if zero_for_one {
+        let a0 = amount0_delta(sqrt_price_next, sqrt_price_current, liquidity, true).min(u64::MAX as u128) as u64;
+        let a1 = amount1_delta(sqrt_price_next, sqrt_price_current, liquidity, false).min(u64::MAX as u128) as u64;
         (a0, a1)
     } else {
-        let a1 = amount1_delta(sqrt_price_current, sqrt_price_next, liquidity, true);
-        let a0 = amount0_delta(sqrt_price_current, sqrt_price_next, liquidity, false);
+        let a1 = amount1_delta(sqrt_price_current, sqrt_price_next, liquidity, true).min(u64::MAX as u128) as u64;
+        let a0 = amount0_delta(sqrt_price_current, sqrt_price_next, liquidity, false).min(u64::MAX as u128) as u64;
         (a1, a0)
     };
 
     // Fee on the amount_in.
-    let fee_amount = if reached_target {
-        // Fee on remaining input after reaching target.
-        let gross_needed = amount_in;
-        gross_needed * fee_factor as u64 / (10_000 - fee_factor as u64).max(1)
+    let fee_amount: u64 = if reached_target {
+        (amount_in as u128 * fee_factor / (10_000 - fee_factor).max(1)) as u64
     } else {
         amount_remaining.saturating_sub(amount_in)
     };
