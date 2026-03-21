@@ -31,23 +31,19 @@ class IntentRouterServicer(intent_router_pb2_grpc.IntentRouterServicer):
         self.use_ollama = use_ollama
         self.llm_available = self._check_llm_available()
         
-        self.prompt_template = """Extract and respond ONLY with valid JSON. No other text.
+        self.prompt_template = """TASK: Classify the user query into a JSON format. RESPOND ONLY WITH JSON, NOTHING ELSE.
 
-Categories:
-- action: analyze_risk | execute_strategy | check_position | get_price
-- scope: portfolio | specific_asset | specific_pool
-- parameters: {{}} object
+USER QUERY: {user_query}
 
-EXAMPLES:
-"Analyze my portfolio risk" → {{"action":"analyze_risk","scope":"portfolio","parameters":{{}}}}
-"XRP/USD position worth?" → {{"action":"check_position","scope":"specific_pool","parameters":{{"pool":"XRP/USD"}}}}
-"Execute conservative hedge" → {{"action":"execute_strategy","scope":"portfolio","parameters":{{"strategy":"conservative"}}}}
-"IL amount?" → {{"action":"analyze_risk","scope":"portfolio","parameters":{{"focus":"impermanent_loss"}}}}
-"Bitcoin price?" → {{"action":"get_price","scope":"specific_asset","parameters":{{"asset":"Bitcoin"}}}}
+RETURN ONLY THIS JSON FORMAT (no explanation, no extra text):
+{{"action": "analyze_risk|execute_strategy|check_position|get_price", "scope": "portfolio|specific_asset|specific_pool", "confidence": 0.0-1.0, "parameters": {{}}}}
 
-User: {user_query}
+Examples:
+- "analyze my portfolio" → {{"action":"analyze_risk","scope":"portfolio","confidence":0.95,"parameters":{{}}}}
+- "XRP price" → {{"action":"get_price","scope":"specific_asset","confidence":0.9,"parameters":{{"asset":"XRP"}}}}
+- "hedge strategy" → {{"action":"execute_strategy","scope":"portfolio","confidence":0.85,"parameters":{{"strategy":"conservative"}}}}
 
-**Output Format**: OUTPUT A JSON STRING:"""
+REMEMBER: RESPOND ONLY WITH JSON. NO WORDS BEFORE OR AFTER."""
 
     def _check_llm_available(self) -> bool:
         """Check if local LLM is available"""
@@ -165,15 +161,21 @@ User: {user_query}
         Returns:
             IntentResponse with classified intent
         """
+        print(f"\n{'='*60}")
+        print(f"📨 [Intent Router] Received query: '{request.user_query}'")
+        print(f"{'='*60}")
+        
         logger.info(f"Received query: {request.user_query}")
         
         # Build prompt with user query
         prompt = self.prompt_template.format(user_query=request.user_query)
         
         # Call local LLM
+        print(f"🧠 [Intent Router] Calling local LLM (Ollama)...")
         llm_output = self._call_local_llm(prompt)
         
         if not llm_output:
+            print(f"❌ [Intent Router] LLM inference returned None")
             logger.warning("LLM inference returned None")
             return intent_router_pb2.IntentResponse(
                 action="error",
@@ -182,10 +184,14 @@ User: {user_query}
                 confidence=0.0
             )
         
+        print(f"📝 [Intent Router] LLM output:\n{llm_output}\n")
+        
         # Parse and validate response
+        print(f"🔍 [Intent Router] Parsing response...")
         parsed = self._parse_intent_response(llm_output)
         
         if not parsed:
+            print(f"❌ [Intent Router] Failed to parse intent response")
             logger.warning("Failed to parse intent response")
             return intent_router_pb2.IntentResponse(
                 action="error",
@@ -193,6 +199,12 @@ User: {user_query}
                 is_valid=False,
                 confidence=0.0
             )
+        
+        print(f"✅ [Intent Router] Successfully classified:")
+        print(f"   Action: {parsed.get('action')}")
+        print(f"   Scope: {parsed.get('scope')}")
+        print(f"   Confidence: {parsed.get('confidence')}")
+        print(f"\n✅ [Intent Router] Returning response to Backend\n")
         
         # Convert parameters dict to repeated Parameter message
         parameters = [
