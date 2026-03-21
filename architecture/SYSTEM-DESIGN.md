@@ -374,6 +374,15 @@
 
 
 
+\## Key Formatting Rules in .proto Files
+
+- **Field numbers** — every field gets a unique integer tag (= 1, = 2), used in binary encoding instead of field names
+- **Types** — strongly typed: string, int32, bool, repeated (list), map, etc.
+- **Services** — define RPC methods with typed request/response messages
+- **Packages** — namespace your messages to avoid collisions
+
+
+
 \## Next Steps
 
 
