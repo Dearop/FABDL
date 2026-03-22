@@ -1,12 +1,9 @@
 /**
  * Vault Registry Service
  *
- * Fetches all XLS-65 Single Asset Vaults from the lending devnet.
- * Mirrors poolRegistry.ts - pure async logic, no React dependencies.
- *
- * The live lending devnet exposes discoverable vaults and loan brokers
- * through AccountRoot helpers plus ledger_entry lookups for the actual
- * Vault / LoanBroker objects.
+ * Lending-devnet execution is limited to a small, deterministic set of vaults.
+ * Vault discovery happens from explicit vault IDs, with optional broker lookup
+ * per vault account when needed.
  */
 
 import { Client } from 'xrpl'
@@ -25,158 +22,191 @@ export interface VaultEntry {
   loanBrokerAccount?: string
 }
 
-/** Vault key: just the currency ticker, e.g. "XRP" or "USD" */
 export type VaultKey = string
 
 const LENDING_DEVNET_WS = 'wss://lend.devnet.rippletest.net:51233/'
+const CONNECT_TIMEOUT_MS = 10_000
+const REQUEST_TIMEOUT_MS = 15_000
+
+const CONFIGURED_VAULTS: Record<VaultKey, VaultEntry> = {
+  XRP: {
+    vaultId: '0003696200AC68669B62D187FCBC2911CBA663DA5EBF8BE328177F3BE3834E76',
+    asset: { currency: 'XRP' },
+    vaultAccount: 'r4RhiW8F5HYmK93SwjuFApBXv7Z8AZWyFJ',
+    loanBrokerId: '93A79D15EEF29D43EA36F75F770D400A0B565FFD81370E70D1D7D7C8260C4266',
+    loanBrokerAccount: 'rGYY67QvsdU4YJNACALcxoW6y6GR5DUdoB',
+  },
+  USD: {
+    vaultId: '0004F9850AE032287576264B2DD2B8C151C3323C0BCDAFE0B1D1BD19B1B85ECE',
+    asset: { currency: 'USD', issuer: 'rh6KkQSYrG9arNP5b5KjK4ggZhVvD1nZ2C' },
+    vaultAccount: 'rG5qS52cGeMmDQpfXS1TnL1qGaScbW12x7',
+    loanBrokerId: '5937D9F102AA863BD2EAA709DFCBAC51F8D22C4C0F26F3BEFAA8309E5C1A952A',
+    loanBrokerAccount: 'rEdpSH6qEtb2BFFF8Ph87zdLLcLz2QxaeG',
+  },
+}
+
+const validatedVaults = new Map<VaultKey, VaultEntry>()
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  label: string,
+): Promise<T> {
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeoutHandle = setTimeout(() => {
+          reject(new Error(`${label} timed out after ${timeoutMs}ms`))
+        }, timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeoutHandle) clearTimeout(timeoutHandle)
+  }
+}
+
+function normalizeVaultKey(assetCode: string): VaultKey {
+  return assetCode.trim().toUpperCase()
+}
+
+function cloneVault(entry: VaultEntry): VaultEntry {
+  return {
+    ...entry,
+    asset: entry.asset.currency === 'XRP' ? { currency: 'XRP' } : { ...entry.asset },
+  }
+}
 
 function assetFromVaultNode(node: Record<string, unknown>): PoolAsset | null {
   const raw = node.Asset as Record<string, string> | undefined
-  if (!raw) return null
+  if (!raw?.currency) return null
   if (raw.currency === 'XRP') return { currency: 'XRP' }
-  if (raw.currency && raw.issuer) return { currency: raw.currency, issuer: raw.issuer }
+  if (raw.issuer) return { currency: raw.currency.toUpperCase(), issuer: raw.issuer }
   return null
 }
 
-async function fetchLedgerEntry(
+function assetMatchesKey(asset: PoolAsset, key: VaultKey): boolean {
+  return asset.currency.toUpperCase() === key
+}
+
+async function fetchVaultNode(
   client: Client,
-  index: string,
-): Promise<Record<string, unknown> | null> {
-  try {
-    const response = await client.request({
+  vaultId: string,
+): Promise<Record<string, unknown>> {
+  const response = await withTimeout(
+    client.request({
       command: 'ledger_entry',
       ledger_index: 'validated',
-      index,
-    } as Parameters<typeof client.request>[0])
+      index: vaultId,
+    } as Parameters<typeof client.request>[0]),
+    REQUEST_TIMEOUT_MS,
+    `Vault lookup ${vaultId}`,
+  )
 
-    return response.result.node as Record<string, unknown>
-  } catch {
-    return null
-  }
+  return response.result.node as Record<string, unknown>
 }
 
-async function fetchEntriesInChunks(
+async function resolveLoanBrokerForVault(
   client: Client,
-  indexes: string[],
-): Promise<Map<string, Record<string, unknown>>> {
-  const results = new Map<string, Record<string, unknown>>()
+  vault: VaultEntry,
+): Promise<Pick<VaultEntry, 'loanBrokerId' | 'loanBrokerAccount'>> {
+  const response = await withTimeout(
+    client.request({
+      command: 'account_objects',
+      account: vault.vaultAccount,
+      type: 'loan_broker',
+      ledger_index: 'validated',
+      limit: 20,
+    } as Parameters<typeof client.request>[0]),
+    REQUEST_TIMEOUT_MS,
+    `Loan broker lookup ${vault.vaultAccount}`,
+  )
 
-  for (let i = 0; i < indexes.length; i += 20) {
-    const chunk = indexes.slice(i, i + 20)
-    const entries = await Promise.all(
-      chunk.map(async (index) => [index, await fetchLedgerEntry(client, index)] as const),
-    )
+  const objects = (response.result.account_objects ?? []) as Array<Record<string, unknown>>
+  for (const entry of objects) {
+    if (entry.LedgerEntryType !== 'LoanBroker') continue
+    if ((entry.VaultID as string | undefined) !== vault.vaultId) continue
 
-    for (const [index, entry] of entries) {
-      if (entry) results.set(index, entry)
+    return {
+      loanBrokerId: (entry.index as string | undefined) ?? vault.loanBrokerId,
+      loanBrokerAccount: (entry.Account as string | undefined) ?? vault.loanBrokerAccount,
     }
   }
 
-  return results
+  return {
+    loanBrokerId: vault.loanBrokerId,
+    loanBrokerAccount: vault.loanBrokerAccount,
+  }
 }
 
-/**
- * Fetch all Single Asset Vaults from the given XRPL websocket endpoint.
- * Returns a Map keyed by asset currency ticker (e.g. "XRP", "USD").
- * If multiple vaults exist for the same asset, a broker-enabled vault wins.
- */
-export async function fetchAllVaults(
-  wsUrl: string = LENDING_DEVNET_WS,
-): Promise<Map<VaultKey, VaultEntry>> {
-  const client = new Client(wsUrl)
-  await client.connect()
+async function validateConfiguredVault(
+  client: Client,
+  entry: VaultEntry,
+): Promise<VaultEntry> {
+  const node = await fetchVaultNode(client, entry.vaultId)
+  if (node.LedgerEntryType !== 'Vault') {
+    throw new Error(`Configured vault ${entry.vaultId} is not a live Vault ledger entry`)
+  }
 
-  const vaultRoots: Array<{ vaultId: string; vaultAccount: string }> = []
-  const brokerRoots: Array<{ loanBrokerId: string; loanBrokerAccount: string }> = []
+  const asset = assetFromVaultNode(node)
+  if (!asset || !assetMatchesKey(asset, entry.asset.currency.toUpperCase())) {
+    throw new Error(
+      `Configured vault ${entry.vaultId} does not match expected asset ${entry.asset.currency}`,
+    )
+  }
+
+  const vaultAccount = (node.Account as string | undefined) ?? entry.vaultAccount
+  const broker = await resolveLoanBrokerForVault(client, { ...entry, asset, vaultAccount })
+
+  return {
+    ...entry,
+    asset,
+    vaultAccount,
+    ...broker,
+  }
+}
+
+export function listConfiguredVaults(): VaultKey[] {
+  return Object.keys(CONFIGURED_VAULTS)
+}
+
+export function isVaultSupportedForExecution(assetCode: string | null | undefined): boolean {
+  if (!assetCode) return false
+  return Object.prototype.hasOwnProperty.call(CONFIGURED_VAULTS, normalizeVaultKey(assetCode))
+}
+
+export async function resolveVaultByAsset(
+  assetCode: string,
+  wsUrl: string = LENDING_DEVNET_WS,
+): Promise<VaultEntry> {
+  const key = normalizeVaultKey(assetCode)
+  const cached = validatedVaults.get(key)
+  if (cached) return cached
+
+  const configured = CONFIGURED_VAULTS[key]
+  if (!configured) {
+    const available = listConfiguredVaults().join(', ') || 'none'
+    throw new Error(
+      `Vault "${key}" is not configured for live execution on lending devnet. Available vaults: ${available}.`,
+    )
+  }
+
+  const client = new Client(wsUrl)
+  await withTimeout(client.connect(), CONNECT_TIMEOUT_MS, 'Vault lookup websocket connect')
 
   try {
-    let marker: unknown = undefined
-
-    do {
-      const response = await client.request({
-        command: 'ledger_data',
-        ledger_index: 'validated',
-        type: 'account',
-        limit: 400,
-        ...(marker !== undefined ? { marker } : {}),
-      } as Parameters<typeof client.request>[0])
-
-      const { state, marker: nextMarker } = response.result as {
-        state: Array<Record<string, unknown>>
-        marker?: unknown
-      }
-
-      for (const entry of state) {
-        if (entry.LedgerEntryType !== 'AccountRoot') continue
-
-        const vaultId = entry.VaultID as string | undefined
-        if (vaultId) {
-          vaultRoots.push({
-            vaultId,
-            vaultAccount: (entry.Account as string) ?? '',
-          })
-        }
-
-        const loanBrokerId = entry.LoanBrokerID as string | undefined
-        if (loanBrokerId) {
-          brokerRoots.push({
-            loanBrokerId,
-            loanBrokerAccount: (entry.Account as string) ?? '',
-          })
-        }
-      }
-
-      marker = nextMarker
-    } while (marker !== undefined)
-
-    const vaultNodes = await fetchEntriesInChunks(
-      client,
-      vaultRoots.map((entry) => entry.vaultId),
-    )
-    const brokerNodes = await fetchEntriesInChunks(
-      client,
-      brokerRoots.map((entry) => entry.loanBrokerId),
-    )
-
-    const brokerByVaultId = new Map<string, { loanBrokerId: string; loanBrokerAccount: string }>()
-    for (const brokerRoot of brokerRoots) {
-      const node = brokerNodes.get(brokerRoot.loanBrokerId)
-      if (!node || node.LedgerEntryType !== 'LoanBroker') continue
-
-      const vaultId = node.VaultID as string | undefined
-      if (!vaultId || brokerByVaultId.has(vaultId)) continue
-
-      brokerByVaultId.set(vaultId, {
-        loanBrokerId: brokerRoot.loanBrokerId,
-        loanBrokerAccount: brokerRoot.loanBrokerAccount,
-      })
-    }
-
-    const vaults = new Map<VaultKey, VaultEntry>()
-    for (const vaultRoot of vaultRoots) {
-      const node = vaultNodes.get(vaultRoot.vaultId)
-      if (!node || node.LedgerEntryType !== 'Vault') continue
-
-      const asset = assetFromVaultNode(node)
-      if (!asset) continue
-
-      const key = asset.currency
-      const broker = brokerByVaultId.get(vaultRoot.vaultId)
-      const candidate: VaultEntry = {
-        vaultId: vaultRoot.vaultId,
-        asset,
-        vaultAccount: vaultRoot.vaultAccount,
-        ...(broker ?? {}),
-      }
-
-      const existing = vaults.get(key)
-      if (!existing || (!existing.loanBrokerId && candidate.loanBrokerId)) {
-        vaults.set(key, candidate)
-      }
-    }
-
-    return vaults
+    const resolved = await validateConfiguredVault(client, configured)
+    validatedVaults.set(key, resolved)
+    return resolved
   } finally {
     if (client.isConnected()) await client.disconnect()
   }
+}
+
+export async function fetchAllVaults(): Promise<Map<VaultKey, VaultEntry>> {
+  const entries: Array<[VaultKey, VaultEntry]> = Object.entries(CONFIGURED_VAULTS)
+    .map(([key, value]): [VaultKey, VaultEntry] => [key, cloneVault(value)])
+  return new Map<VaultKey, VaultEntry>(entries)
 }

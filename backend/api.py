@@ -127,6 +127,14 @@ ALLOWED_ASSETS = {"XRP", "USD", "BTC", "ETH", "USDC", "USDT"}
 ALLOWED_ACTIONS = {"swap", "deposit", "withdraw", "lend", "borrow"}
 ALLOWED_DEPOSIT_MODES = {"single_asset", "two_asset", None}
 
+
+def _log_json(label: str, payload: object) -> None:
+    try:
+        rendered = json.dumps(payload, indent=2, sort_keys=True, default=str)
+    except Exception:
+        rendered = str(payload)
+    print(f"{label}:\n{rendered}")
+
 # ==================== Request/Response Models ====================
 
 class WalletConnectRequest(BaseModel):
@@ -221,12 +229,14 @@ def _build_intent_router_output(intent: dict, wallet_id: str) -> dict:
         parameters["pool"] = grpc_params["pool"]
     if "focus" in grpc_params:
         parameters["focus"] = grpc_params["focus"]
-    return {
+    payload = {
         "action": intent["action"],
         "scope": intent["scope"],
         "parameters": parameters,
         "confidence": intent.get("confidence", 0.0),
     }
+    _log_json("  [Backend] Built IntentRouterOutput", payload)
+    return payload
 
 
 async def _call_rust_backend(intent_payload: dict) -> str:
@@ -234,15 +244,22 @@ async def _call_rust_backend(intent_payload: dict) -> str:
     POST IntentRouterOutput JSON to the Rust /analyze endpoint.
     Returns the plain-text rendered PortfolioRiskSummary prompt string.
     """
-    print(f"  [Backend] POST {RUST_BACKEND_URL}/analyze  payload={intent_payload}")
+    _log_json(f"  [Backend] POST {RUST_BACKEND_URL}/analyze", intent_payload)
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(f"{RUST_BACKEND_URL}/analyze", json=intent_payload)
     if response.status_code != 200:
+        print(
+            f"  [Backend] Rust backend non-200 status={response.status_code} "
+            f"body={response.text[:800]}"
+        )
         raise HTTPException(
             status_code=response.status_code,
             detail=f"Rust analysis backend error: {response.text}",
         )
-    print(f"  [Backend] Rust returned prompt ({len(response.text)} chars)")
+    print(
+        f"  [Backend] Rust returned prompt ({len(response.text)} chars) "
+        f"preview={response.text[:300]!r}"
+    )
     return response.text
 
 
@@ -317,12 +334,45 @@ def _validate_strategy(s: dict) -> bool:
     return True
 
 
+def _is_demo_executable_strategy(strategy: dict) -> bool:
+    actions = strategy.get("trade_actions", [])
+    if not actions:
+        return False
+
+    for action in actions:
+        if action.get("action") != "lend":
+            return False
+        if action.get("asset_in") not in {"XRP", "USD"}:
+            return False
+
+    return True
+
+
+def _ensure_demo_executable_strategy(strategies: list) -> list:
+    if any(_is_demo_executable_strategy(strategy) for strategy in strategies):
+        return strategies
+
+    print("  [Backend] No demo-executable strategy found - injecting lending fallback")
+    replacement = _fallback_strategies()[1]
+    normalized = list(strategies[:3])
+
+    if len(normalized) >= 2:
+        normalized[1] = replacement
+    else:
+        normalized.append(replacement)
+
+    return normalized[:3]
+
+
 def _validate_and_filter_strategies(claude_response: dict) -> list:
     strategies = claude_response.get("strategies", [])
+    _log_json("  [Backend] Claude strategies before validation", strategies)
     valid = [s for s in strategies if _validate_strategy(s)]
     if len(valid) < 2:
-        print(f"  [Backend] Only {len(valid)} strategies passed validation — using fallback")
+        print(f"  [Backend] Only {len(valid)} strategies passed validation - using fallback")
         return _fallback_strategies()
+    valid = _ensure_demo_executable_strategy(valid)
+    _log_json("  [Backend] Strategies after validation", valid)
     return valid
 
 
@@ -559,7 +609,7 @@ _MCP_TOOLS = [
     {
         "name": "get_lending_context",
         "description": (
-            "Fetch XLS-66d vault APYs, kink utilization, available liquidity, and the wallet's open loans. "
+            "Fetch the lending-related risk summary for a wallet and asset. "
             "Call this when the user asks about borrowing, lending, or delta-neutral strategies."
         ),
         "input_schema": {
@@ -589,11 +639,16 @@ Calling route_intent is optional — use it only if the user query is ambiguous.
 
 async def _execute_mcp_tool(tool_name: str, tool_input: dict, wallet_id: str) -> dict:
     """Execute a single MCP tool call in-process (mirrors mcp-server implementations)."""
+    print(f"  [MCP] executing tool={tool_name} wallet={wallet_id}")
+    _log_json("  [MCP] tool input", tool_input)
+
     if tool_name == "route_intent":
         try:
             intent = await classify_intent_with_grpc(tool_input["query"])
+            _log_json("  [MCP] route_intent result", intent)
             return intent
         except Exception as exc:
+            print(f"  [MCP] route_intent failed: {exc}")
             return {"error": str(exc)}
 
     elif tool_name == "analyze_portfolio":
@@ -606,35 +661,36 @@ async def _execute_mcp_tool(tool_name: str, tool_input: dict, wallet_id: str) ->
             }
             if tool_input.get("pool"):
                 payload["parameters"]["pool"] = tool_input["pool"]
+            _log_json("  [MCP] analyze_portfolio rust payload", payload)
             prompt_text = await _call_rust_backend(payload)
             return {"risk_summary": prompt_text}
         except Exception as exc:
+            print(f"  [MCP] analyze_portfolio failed: {exc}")
             return {"error": str(exc)}
 
     elif tool_name == "get_lending_context":
         try:
             payload = {
-                "action": "check_position",
-                "scope": "specific_asset",
+                "action": "analyze_risk",
+                "scope": "portfolio",
                 "parameters": {
                     "wallet_address": tool_input["wallet_id"],
                     "focus": tool_input["asset"],
                 },
                 "confidence": 1.0,
             }
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                resp = await client.post(f"{RUST_BACKEND_URL}/analyze", json=payload)
-            if resp.status_code != 200:
-                return {"error": f"Rust backend {resp.status_code}: {resp.text}"}
-            try:
-                data = resp.json()
-                return {
-                    "lending_vaults": data.get("lending_vaults", []),
-                    "open_loans": data.get("open_loans", []),
-                }
-            except Exception:
-                return {"raw": resp.text}
+            print(
+                "  [MCP] get_lending_context using analyze_risk fallback; "
+                "Rust check_position requires parameters.pool."
+            )
+            _log_json("  [MCP] get_lending_context rust payload", payload)
+            prompt_text = await _call_rust_backend(payload)
+            return {
+                "asset": tool_input["asset"],
+                "risk_summary": prompt_text,
+            }
         except Exception as exc:
+            print(f"  [MCP] get_lending_context failed: {exc}")
             return {"error": str(exc)}
 
     return {"error": f"Unknown tool: {tool_name}"}
@@ -684,6 +740,7 @@ async def generate_strategies_mcp(request: QueryRequest):
             final_text = next(
                 (b.text for b in response.content if hasattr(b, "text")), ""
             ).strip()
+            print(f"  [MCP] final text preview={final_text[:500]!r}")
             fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", final_text, re.DOTALL)
             if fence:
                 final_text = fence.group(1)

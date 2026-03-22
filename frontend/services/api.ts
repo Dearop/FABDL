@@ -69,6 +69,11 @@ export async function generateStrategies(
   query: string,
   walletId: string
 ): Promise<GenerateStrategiesResponse> {
+  console.debug('[frontend/api] generateStrategies request', {
+    endpoint: `${API_BASE}/strategies/generate-mcp`,
+    walletId,
+    query,
+  })
   const response = await fetch(`${API_BASE}/strategies/generate-mcp`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -77,12 +82,23 @@ export async function generateStrategies(
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
+    console.error('[frontend/api] generateStrategies failed', {
+      status: response.status,
+      statusText: response.statusText,
+      error,
+    })
     throw new Error(
       error.detail || `Failed to generate strategies: ${response.statusText}`
     )
   }
 
-  return response.json()
+  const data = await response.json()
+  console.debug('[frontend/api] generateStrategies response', {
+    mode: data.mode,
+    strategyCount: data.strategies?.length ?? 0,
+    strategyIds: data.strategies?.map((strategy: Strategy) => strategy.id) ?? [],
+  })
+  return data
 }
 
 // ==================== Strategy Execution ====================

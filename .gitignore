@@ -20,20 +20,10 @@ backend/vendor/
 **/*.egg-info/
 **/.pytest_cache/
 
-# LLM Orchestration
-llm-orchestration/__pycache__/
-llm-orchestration/**/__pycache__/
-llm-orchestration/*.pyc
-llm-orchestration/venv/
-llm-orchestration/env/
-llm-orchestration/.env
-llm-orchestration/.pytest_cache/
-
-# Rust (All projects)
+# Rust (all crates)
 **/target/
 Cargo.lock
 **/*.rs.bk
-**/Cargo.lock
 
 # IDE / Editor
 .vscode/settings.json

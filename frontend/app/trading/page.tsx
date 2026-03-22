@@ -1,12 +1,13 @@
 'use client'
 
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback, type KeyboardEvent } from 'react'
 import { generateStrategies } from '@/services/api'
-import { buildAndSubmitStrategy } from '@/services/xrplTransactions'
+import {
+  buildAndSubmitStrategy,
+  getStrategyExecutionSupport,
+} from '@/services/xrplTransactions'
 import PnLChart from '@/components/PnLChart'
 import type { Strategy } from '@/lib/types'
-import { PoolRegistryProvider, usePoolRegistry } from '@/contexts/PoolRegistryContext'
-import { VaultRegistryProvider, useVaultRegistry } from '@/contexts/VaultRegistryContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -20,16 +21,12 @@ import { KeyEntryModal } from '@/components/KeyEntryModal'
 import { cn } from '@/lib/utils'
 import { Send, Wallet, ArrowRight, Check, X, Bot, KeyRound } from 'lucide-react'
 
-// --------------- Types ---------------
-
 interface Message {
   id: string
   role: 'user' | 'assistant' | 'error'
   content: string
   strategies?: Strategy[]
 }
-
-// --------------- Helpers ---------------
 
 let msgCount = 0
 function nextId() {
@@ -53,25 +50,13 @@ const PROVIDER_LABELS: Record<string, string> = {
   crossmark: 'identity only',
 }
 
-// --------------- Page Shell (provides pool registry) ---------------
-
 export default function TradingPage() {
   const wallet = useWallet()
-  return (
-    <PoolRegistryProvider walletAddress={wallet.address}>
-      <VaultRegistryProvider walletAddress={wallet.address}>
-        <TradingPageInner wallet={wallet} />
-      </VaultRegistryProvider>
-    </PoolRegistryProvider>
-  )
+  return <TradingPageInner wallet={wallet} />
 }
-
-// --------------- Inner Page (consumes pool registry) ---------------
 
 function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) {
   const walletId = wallet.address ?? ''
-  const { pools, isLoading: poolsLoading, error: poolsError } = usePoolRegistry()
-  const { vaults, isLoading: vaultsLoading, error: vaultsError } = useVaultRegistry()
 
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -83,18 +68,18 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
   const inputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
 
-  const registryLoading = poolsLoading || vaultsLoading
-  const registryErrors = [
-    poolsError ? `Pool registry: ${poolsError}` : null,
-    vaultsError ? `Vault registry: ${vaultsError}` : null,
-  ].filter((value): value is string => Boolean(value))
   const canSign =
     wallet.address !== null &&
-    wallet.providerType !== 'crossmark' &&
-    !registryLoading &&
-    registryErrors.length === 0
+    wallet.providerType !== 'crossmark'
 
-  // Derived: latest strategies from most recent assistant message
+  useEffect(() => {
+    console.debug('[trading/page] execute state', {
+      walletAddress: wallet.address,
+      providerType: wallet.providerType,
+      canSign,
+    })
+  }, [wallet.address, wallet.providerType, canSign])
+
   const latestStrategies = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
       if (messages[i].role === 'assistant' && messages[i].strategies?.length) {
@@ -104,12 +89,10 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
     return []
   }, [messages])
 
-  // Auto-scroll chat on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
 
-  // Connect handler (auto-detect extension)
   const handleConnect = useCallback(async () => {
     try {
       await wallet.connect()
@@ -122,11 +105,15 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
     }
   }, [wallet, toast])
 
-  // Send handler
   const handleSend = useCallback(async () => {
     const query = inputValue.trim()
     if (!query || isLoading || !wallet.address) return
 
+    console.debug('[trading/page] submit query', {
+      query,
+      walletId,
+      canSign,
+    })
     setInputValue('')
     setMessages(prev => [...prev, { id: nextId(), role: 'user', content: query }])
     setIsLoading(true)
@@ -134,6 +121,20 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
     try {
       const response = await generateStrategies(query, walletId)
       const count = response.strategies?.length ?? 0
+      console.debug('[trading/page] strategies loaded', {
+        count,
+        tradeActionCounts: response.strategies?.map(strategy => ({
+          id: strategy.id,
+          title: strategy.title,
+          tradeActions: strategy.trade_actions.length,
+          actions: strategy.trade_actions.map(action => ({
+            action: action.action,
+            pool: action.pool ?? null,
+            asset_in: action.asset_in,
+            asset_out: action.asset_out,
+          })),
+        })),
+      })
       setMessages(prev => [
         ...prev,
         {
@@ -146,6 +147,7 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
         },
       ])
     } catch (err) {
+      console.error('[trading/page] generateStrategies failed', err)
       setMessages(prev => [
         ...prev,
         {
@@ -158,11 +160,17 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
       setIsLoading(false)
       inputRef.current?.focus()
     }
-  }, [inputValue, isLoading, walletId, wallet.address])
+  }, [inputValue, isLoading, walletId, wallet.address, canSign])
 
-  // Execute handler — builds real XRPL transactions and submits
   const handleExecute = useCallback(async (strategyId: string) => {
     if (isExecuting) return
+
+    console.debug('[trading/page] execute clicked', {
+      strategyId,
+      walletAddress: wallet.address,
+      providerType: wallet.providerType,
+      canSign,
+    })
 
     if (wallet.providerType === 'crossmark') {
       toast({
@@ -174,7 +182,20 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
     }
 
     const strategy = latestStrategies.find(s => s.id === strategyId)
-    if (!strategy || !wallet.address) return
+    if (!strategy || !wallet.address) {
+      console.warn('[trading/page] execute aborted before submit', {
+        strategyFound: Boolean(strategy),
+        walletAddress: wallet.address,
+      })
+      return
+    }
+
+    console.debug('[trading/page] execute strategy payload', {
+      strategyId: strategy.id,
+      title: strategy.title,
+      tradeActions: strategy.trade_actions,
+      executionSupport: getStrategyExecutionSupport(strategy),
+    })
 
     setIsExecuting(strategyId)
     try {
@@ -182,14 +203,13 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
         strategy,
         wallet.address,
         wallet.signAndSubmit,
-        pools,
-        vaults,
       )
       toast({
         title: 'Strategy Executed',
         description: `Transaction hash: ${result.txHash.slice(0, 8)}...`,
       })
     } catch (err) {
+      console.error('[trading/page] buildAndSubmitStrategy failed', err)
       toast({
         title: 'Execution Failed',
         description: err instanceof Error ? err.message : 'Unknown error',
@@ -198,11 +218,10 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
     } finally {
       setIsExecuting(null)
     }
-  }, [isExecuting, wallet, latestStrategies, toast, pools, vaults])
+  }, [isExecuting, wallet, latestStrategies, toast, canSign])
 
-  // Keyboard handler
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
+    (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault()
         handleSend()
@@ -213,11 +232,8 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
 
   const sendDisabled = !inputValue.trim() || isLoading || !wallet.address
 
-  // ====================== JSX ======================
-
   return (
     <div className="flex flex-col h-screen bg-background">
-      {/* ---- Top Bar ---- */}
       <header className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
         <h1 className="text-lg font-semibold text-foreground">AI Trading Assistant</h1>
         <div className="flex items-center gap-2">
@@ -272,29 +288,13 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
         </div>
       </header>
 
-      {/* ---- Devnet Banner ---- */}
       {wallet.providerType === 'key-entry' && (
         <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 text-xs text-amber-400 text-center">
-          Connected to XRPL Lending Devnet — transactions use devnet funds only
+          Connected to XRPL Lending Devnet - transactions use devnet funds only. Live execution is currently enabled for XRP/USD vault lending.
         </div>
       )}
 
-      {/* ---- Pool Registry Status ---- */}
-      {registryLoading && (
-        <div className="bg-muted/50 border-b border-border px-4 py-1.5 text-xs text-muted-foreground text-center flex items-center justify-center gap-2">
-          <Spinner className="h-3 w-3" />
-          Loading pool and vault registries...
-        </div>
-      )}
-      {registryErrors.length > 0 && (
-        <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-1.5 text-xs text-destructive text-center">
-          {registryErrors.join(' | ')}
-        </div>
-      )}
-
-      {/* ---- Main Content ---- */}
       <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
-        {/* ---- Chat Panel (left ~40%) ---- */}
         <div className="flex flex-col lg:w-2/5 border-b lg:border-b-0 lg:border-r border-border h-[50vh] lg:h-auto">
           <ScrollArea className="flex-1 p-4">
             <div className="space-y-4">
@@ -339,7 +339,6 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
             </div>
           </ScrollArea>
 
-          {/* Input bar */}
           <div className="border-t border-border p-4 shrink-0">
             <div className="flex items-center gap-2">
               <Input
@@ -367,7 +366,6 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
           </div>
         </div>
 
-        {/* ---- Strategy Panel (right ~60%) ---- */}
         <div className="flex-1 lg:w-3/5 overflow-y-auto p-4">
           {latestStrategies.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-sm">
@@ -387,18 +385,15 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
                   />
                 ))}
               </div>
-              {latestStrategies.length > 0 && (
-                <div className="mt-4">
-                  <h3 className="text-sm font-medium text-muted-foreground mb-2">7-Day Projected Returns</h3>
-                  <PnLChart strategies={latestStrategies} />
-                </div>
-              )}
+              <div className="mt-4">
+                <h3 className="text-sm font-medium text-muted-foreground mb-2">7-Day Projected Returns</h3>
+                <PnLChart strategies={latestStrategies} />
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* ---- Key Entry Modal ---- */}
       <KeyEntryModal
         open={keyEntryOpen}
         onOpenChange={setKeyEntryOpen}
@@ -414,8 +409,6 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
   )
 }
 
-// --------------- Strategy Card (inline sub-component) ---------------
-
 function StrategyCard({
   strategy,
   isExecuting,
@@ -428,6 +421,15 @@ function StrategyCard({
   canSign: boolean
 }) {
   const { label, cls } = riskBadge(strategy.risk_score)
+  const executionSupport = getStrategyExecutionSupport(strategy)
+  const executeDisabledReason =
+    isExecuting !== null
+      ? 'Another strategy is already executing'
+      : !canSign
+        ? 'Connect a signing wallet to execute strategies'
+        : !executionSupport.executable
+          ? executionSupport.reason
+          : undefined
 
   return (
     <Card className="flex flex-col h-full">
@@ -442,7 +444,6 @@ function StrategyCard({
       </CardHeader>
 
       <CardContent className="flex-1 flex flex-col gap-3 text-xs">
-        {/* Pros / Cons */}
         <div className="grid grid-cols-2 gap-2">
           <div className="space-y-1">
             <p className="font-medium text-green-400">Pros</p>
@@ -464,7 +465,6 @@ function StrategyCard({
           </div>
         </div>
 
-        {/* Projected Returns */}
         <div>
           <p className="font-medium text-muted-foreground mb-1">7-Day Projected Return</p>
           <div className="grid grid-cols-3 gap-2 text-center">
@@ -483,7 +483,6 @@ function StrategyCard({
           </div>
         </div>
 
-        {/* Trade Actions Table */}
         {strategy.trade_actions.length > 0 && (
           <div>
             <p className="font-medium text-muted-foreground mb-1">Trade Actions</p>
@@ -503,13 +502,18 @@ function StrategyCard({
           </div>
         )}
 
-        {/* Execute Button */}
+        {!executionSupport.executable && (
+          <p className="text-[11px] text-amber-400">
+            {executionSupport.reason}
+          </p>
+        )}
+
         <Button
           className="mt-auto w-full"
           size="sm"
           onClick={() => onExecute(strategy.id)}
-          disabled={isExecuting !== null || !canSign}
-          title={!canSign ? 'Connect a signing wallet to execute' : undefined}
+          disabled={isExecuting !== null || !canSign || !executionSupport.executable}
+          title={executeDisabledReason}
         >
           {isExecuting === strategy.id ? (
             <>

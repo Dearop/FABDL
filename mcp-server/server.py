@@ -81,7 +81,7 @@ TOOLS = [
     Tool(
         name="get_lending_context",
         description=(
-            "Fetch current XLS-66d vault APYs and utilization rates for a given asset"
+            "Fetch the lending-related risk summary for a wallet and asset"
         ),
         inputSchema={
             "type": "object",
@@ -159,10 +159,10 @@ async def _generate_strategies(user_query: str, wallet_id: str) -> dict:
 
 
 async def _get_lending_context(asset: str, wallet_id: str) -> dict:
-    """POST to Rust /analyze with action=check_position, return lending fields."""
+    """POST to Rust /analyze with action=analyze_risk and return the text summary."""
     payload = {
-        "action": "check_position",
-        "scope": "specific_asset",
+        "action": "analyze_risk",
+        "scope": "portfolio",
         "parameters": {"wallet_address": wallet_id, "focus": asset},
         "confidence": 1.0,
     }
@@ -171,13 +171,9 @@ async def _get_lending_context(asset: str, wallet_id: str) -> dict:
             resp = await client.post(f"{RUST_BACKEND_URL}/analyze", json=payload)
         if resp.status_code != 200:
             return {"error": f"Rust backend returned {resp.status_code}: {resp.text}"}
-        try:
-            data = resp.json()
-        except json.JSONDecodeError:
-            return {"error": "Rust backend returned non-JSON response"}
         return {
-            "lending_vaults": data.get("lending_vaults", []),
-            "open_loans": data.get("open_loans", []),
+            "asset": asset,
+            "risk_summary": resp.text,
         }
     except Exception as exc:
         return {"error": f"Lending context request failed: {exc}"}

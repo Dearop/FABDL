@@ -1,11 +1,10 @@
 /**
  * Pool Registry Service
  *
- * Fetches all AMM pools from an XRPL node by walking ledger_data pages.
- * Pure async logic — no React dependencies.
+ * Live AMM execution on lending devnet must use an allowlist of issuer-qualified
+ * pool assets. XRPL JSON-RPC does not provide a bounded pool-discovery path that
+ * is safe to run in the browser during execution.
  */
-
-import { Client } from 'xrpl'
 
 // --------------- Types ---------------
 
@@ -14,7 +13,7 @@ export type TokenAsset = { currency: string; issuer: string }
 export type PoolAsset = XrpAsset | TokenAsset
 
 export interface PoolEntry {
-  /** The AMM's on-ledger account address */
+  /** Optional AMM account address, if known */
   ammAccount: string
   asset1: PoolAsset
   asset2: PoolAsset
@@ -22,20 +21,21 @@ export interface PoolEntry {
   tradingFee: number
 }
 
-/** Normalised pool key, e.g. "XRP/USD" — XRP always first, then alphabetical */
 export type PoolKey = string
+
+interface ConfiguredPoolInput {
+  ammAccount?: string
+  asset1: PoolAsset
+  asset2: PoolAsset
+  tradingFee?: number
+}
 
 // --------------- Helpers ---------------
 
-/** Normalise an asset to a short label for use in pool keys */
 function assetLabel(asset: PoolAsset): string {
-  return asset.currency === 'XRP' ? 'XRP' : asset.currency
+  return asset.currency === 'XRP' ? 'XRP' : asset.currency.toUpperCase()
 }
 
-/**
- * Build a canonical pool key from two assets.
- * XRP always comes first; for two non-XRP assets, sort alphabetically.
- */
 export function poolKey(a: PoolAsset, b: PoolAsset): PoolKey {
   const la = assetLabel(a)
   const lb = assetLabel(b)
@@ -44,65 +44,106 @@ export function poolKey(a: PoolAsset, b: PoolAsset): PoolKey {
   return la < lb ? `${la}/${lb}` : `${lb}/${la}`
 }
 
-/** Parse an XRPL ledger Asset object into a PoolAsset */
-function parseAsset(raw: Record<string, string>): PoolAsset {
-  if (raw.currency === 'XRP') return { currency: 'XRP' }
-  return { currency: raw.currency, issuer: raw.issuer }
-}
-
-// --------------- Core Fetch ---------------
-
-const LENDING_DEVNET_WS = 'wss://lend.devnet.rippletest.net:51233/'
-
-/**
- * Fetch all AMM pools from the given XRPL websocket endpoint.
- * Follows pagination markers until all pages are consumed.
- * Returns a Map keyed by normalised pool key (e.g. "XRP/USD").
- */
-export async function fetchAllPools(
-  wsUrl: string = LENDING_DEVNET_WS,
-): Promise<Map<PoolKey, PoolEntry>> {
-  const client = new Client(wsUrl)
-  await client.connect()
-
-  const pools = new Map<PoolKey, PoolEntry>()
-
-  try {
-    let marker: unknown = undefined
-
-    do {
-      const response = await client.request({
-        command: 'ledger_data',
-        type: 'amm',
-        limit: 400,
-        ...(marker !== undefined ? { marker } : {}),
-      } as Parameters<typeof client.request>[0])
-
-      const { state, marker: nextMarker } = response.result as {
-        state: Array<Record<string, unknown>>
-        marker?: unknown
-      }
-
-      for (const entry of state) {
-        if (entry.LedgerEntryType !== 'AMM') continue
-
-        const asset1 = parseAsset(entry.Asset as Record<string, string>)
-        const asset2 = parseAsset(entry.Asset2 as Record<string, string>)
-        const key = poolKey(asset1, asset2)
-
-        pools.set(key, {
-          ammAccount: entry.Account as string,
-          asset1,
-          asset2,
-          tradingFee: (entry.TradingFee as number) ?? 0,
-        })
-      }
-
-      marker = nextMarker
-    } while (marker !== undefined)
-  } finally {
-    if (client.isConnected()) await client.disconnect()
+export function normalizePoolLabel(pool: string): PoolKey {
+  const parts = pool.split('/')
+  if (parts.length !== 2) {
+    throw new Error(`Invalid pool format "${pool}" - expected "ASSET1/ASSET2"`)
   }
 
-  return pools
+  const a: PoolAsset = parts[0].trim().toUpperCase() === 'XRP'
+    ? { currency: 'XRP' }
+    : { currency: parts[0].trim().toUpperCase(), issuer: '' }
+  const b: PoolAsset = parts[1].trim().toUpperCase() === 'XRP'
+    ? { currency: 'XRP' }
+    : { currency: parts[1].trim().toUpperCase(), issuer: '' }
+
+  return poolKey(a, b)
+}
+
+function isTokenAsset(value: unknown): value is TokenAsset {
+  return Boolean(
+    value &&
+      typeof value === 'object' &&
+      'currency' in value &&
+      'issuer' in value &&
+      typeof (value as TokenAsset).currency === 'string' &&
+      typeof (value as TokenAsset).issuer === 'string' &&
+      (value as TokenAsset).issuer.length > 0,
+  )
+}
+
+function isPoolAsset(value: unknown): value is PoolAsset {
+  if (!value || typeof value !== 'object' || !('currency' in value)) return false
+  const currency = (value as { currency?: unknown }).currency
+  if (currency === 'XRP') return true
+  return isTokenAsset(value)
+}
+
+function loadConfiguredPools(): Map<PoolKey, PoolEntry> {
+  const raw = process.env.NEXT_PUBLIC_EXECUTION_POOL_REGISTRY_JSON
+  if (!raw) return new Map()
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) {
+      console.warn('[poolRegistry] NEXT_PUBLIC_EXECUTION_POOL_REGISTRY_JSON must be a JSON array')
+      return new Map()
+    }
+
+    const pools = new Map<PoolKey, PoolEntry>()
+    for (const candidate of parsed) {
+      if (!candidate || typeof candidate !== 'object') continue
+      const { asset1, asset2, ammAccount, tradingFee } = candidate as ConfiguredPoolInput
+      if (!isPoolAsset(asset1) || !isPoolAsset(asset2)) continue
+
+      const key = poolKey(asset1, asset2)
+      pools.set(key, {
+        ammAccount: ammAccount ?? '',
+        asset1,
+        asset2,
+        tradingFee: tradingFee ?? 0,
+      })
+    }
+
+    return pools
+  } catch (error) {
+    console.warn('[poolRegistry] failed to parse NEXT_PUBLIC_EXECUTION_POOL_REGISTRY_JSON', error)
+    return new Map()
+  }
+}
+
+const CONFIGURED_POOLS = loadConfiguredPools()
+
+// --------------- Public API ---------------
+
+export function listConfiguredPools(): PoolKey[] {
+  return [...CONFIGURED_POOLS.keys()]
+}
+
+export function isPoolConfigured(pool: string | null | undefined): boolean {
+  if (!pool) return false
+
+  try {
+    return CONFIGURED_POOLS.has(normalizePoolLabel(pool))
+  } catch {
+    return false
+  }
+}
+
+export function resolveConfiguredPool(pool: string): PoolEntry {
+  const key = normalizePoolLabel(pool)
+  const entry = CONFIGURED_POOLS.get(key)
+
+  if (!entry) {
+    const available = listConfiguredPools().join(', ') || 'none'
+    throw new Error(
+      `AMM pool "${key}" is not configured for live execution on lending devnet. Available configured pools: ${available}.`,
+    )
+  }
+
+  return entry
+}
+
+export async function fetchAllPools(): Promise<Map<PoolKey, PoolEntry>> {
+  return new Map(CONFIGURED_POOLS)
 }

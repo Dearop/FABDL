@@ -8,15 +8,20 @@
 import type { Strategy, TradeAction } from '@/lib/types'
 import type { SignAndSubmitFn } from '@/lib/wallet-providers'
 import {
-  poolKey,
+  isPoolConfigured,
+  normalizePoolLabel,
+  resolveConfiguredPool,
   type PoolAsset,
-  type PoolEntry,
-  type PoolKey,
 } from '@/services/poolRegistry'
-import type { VaultEntry, VaultKey } from '@/services/vaultRegistry'
+import {
+  isVaultSupportedForExecution,
+  resolveVaultByAsset,
+} from '@/services/vaultRegistry'
 
-export type PoolRegistry = Map<PoolKey, PoolEntry>
-export type VaultRegistry = Map<VaultKey, VaultEntry>
+export interface StrategyExecutionSupport {
+  executable: boolean
+  reason?: string
+}
 
 function toDrops(xrpAmount: number): string {
   return String(Math.round(xrpAmount * 1_000_000))
@@ -31,61 +36,74 @@ function toAmount(
   return { currency, issuer, value: String(amount) }
 }
 
-function resolvePool(
-  pool: string,
-  registry: PoolRegistry,
-): { asset1: PoolAsset; asset2: PoolAsset; entry: PoolEntry } {
-  const parts = pool.split('/')
-  if (parts.length !== 2) {
-    throw new Error(`Invalid pool format "${pool}" - expected "ASSET1/ASSET2"`)
-  }
-
-  const a: PoolAsset = parts[0].trim().toUpperCase() === 'XRP'
-    ? { currency: 'XRP' }
-    : { currency: parts[0].trim().toUpperCase(), issuer: '' }
-  const b: PoolAsset = parts[1].trim().toUpperCase() === 'XRP'
-    ? { currency: 'XRP' }
-    : { currency: parts[1].trim().toUpperCase(), issuer: '' }
-
-  const key = poolKey(a, b)
-  const entry = registry.get(key)
-  if (!entry) {
-    const available = [...registry.keys()].join(', ') || 'none'
-    throw new Error(`Pool "${key}" not found in registry. Available pools: ${available}`)
-  }
-
-  return { asset1: entry.asset1, asset2: entry.asset2, entry }
-}
-
-function resolveVault(
-  assetCode: string,
-  registry: VaultRegistry,
-): VaultEntry {
-  const key = assetCode.trim().toUpperCase()
-  const entry = registry.get(key)
-
-  if (!entry) {
-    const available = [...registry.keys()].join(', ') || 'none'
-    throw new Error(`Vault "${key}" not found in registry. Available vaults: ${available}`)
-  }
-
-  return entry
-}
-
 function toLoanRateUnits(ratePercent: number | null | undefined): number {
   if (ratePercent == null) return 0
   return Math.max(0, Math.round(ratePercent * 100))
 }
 
+function unsupported(reason: string): StrategyExecutionSupport {
+  return { executable: false, reason }
+}
+
+function getActionExecutionSupport(action: TradeAction): StrategyExecutionSupport {
+  switch (action.action) {
+    case 'lend':
+      if (!isVaultSupportedForExecution(action.asset_in)) {
+        return unsupported(
+          `Live vault execution is currently enabled only for XRP and USD. Unsupported lending asset: ${action.asset_in.toUpperCase()}.`,
+        )
+      }
+      return { executable: true }
+
+    case 'borrow':
+      return unsupported(
+        'Borrow execution is disabled in the demo until the loan broker signs first.',
+      )
+
+    case 'swap':
+    case 'deposit':
+    case 'withdraw':
+      if (!action.pool) {
+        return unsupported(`${action.action} action is missing a pool label.`)
+      }
+      try {
+        const normalized = normalizePoolLabel(action.pool)
+        if (!isPoolConfigured(action.pool)) {
+          return unsupported(
+            `AMM pool "${normalized}" is not configured for live lending-devnet execution.`,
+          )
+        }
+      } catch (error) {
+        return unsupported(error instanceof Error ? error.message : 'Invalid AMM pool label.')
+      }
+      return { executable: true }
+
+    default:
+      return unsupported(`Unknown action type: ${(action as TradeAction).action}`)
+  }
+}
+
+export function getStrategyExecutionSupport(strategy: Strategy): StrategyExecutionSupport {
+  if (strategy.trade_actions.length === 0) {
+    return unsupported('This strategy has no on-chain transactions to sign.')
+  }
+
+  for (const action of strategy.trade_actions) {
+    const support = getActionExecutionSupport(action)
+    if (!support.executable) return support
+  }
+
+  return { executable: true }
+}
+
 function buildSwapTx(
   action: TradeAction,
   walletAddress: string,
-  registry: PoolRegistry,
 ): Record<string, unknown> {
   const pool = action.pool
   if (!pool) throw new Error('Swap action missing pool field')
 
-  const { asset1, asset2 } = resolvePool(pool, registry)
+  const { asset1, asset2 } = resolveConfiguredPool(pool)
 
   const assetIn = action.asset_in.toUpperCase() === 'XRP' ||
     asset1.currency === action.asset_in.toUpperCase()
@@ -108,12 +126,11 @@ function buildSwapTx(
 function buildDepositTx(
   action: TradeAction,
   walletAddress: string,
-  registry: PoolRegistry,
 ): Record<string, unknown> {
   const pool = action.pool
   if (!pool) throw new Error('Deposit action missing pool field')
 
-  const { asset1, asset2 } = resolvePool(pool, registry)
+  const { asset1, asset2 } = resolveConfiguredPool(pool)
   const flags = action.deposit_mode === 'two_asset' ? 1048576 : 524288
 
   const tx: Record<string, unknown> = {
@@ -141,12 +158,11 @@ function buildDepositTx(
 function buildWithdrawTx(
   action: TradeAction,
   walletAddress: string,
-  registry: PoolRegistry,
 ): Record<string, unknown> {
   const pool = action.pool
   if (!pool) throw new Error('Withdraw action missing pool field')
 
-  const { asset1, asset2 } = resolvePool(pool, registry)
+  const { asset1, asset2 } = resolveConfiguredPool(pool)
 
   return {
     TransactionType: 'AMMWithdraw',
@@ -161,12 +177,11 @@ function buildWithdrawTx(
   }
 }
 
-function buildLendTx(
+async function buildLendTx(
   action: TradeAction,
   walletAddress: string,
-  registry: VaultRegistry,
-): Record<string, unknown> {
-  const vault = resolveVault(action.asset_in, registry)
+): Promise<Record<string, unknown>> {
+  const vault = await resolveVaultByAsset(action.asset_in)
 
   return {
     TransactionType: 'VaultDeposit',
@@ -176,12 +191,11 @@ function buildLendTx(
   }
 }
 
-function buildBorrowTx(
+async function buildBorrowTx(
   action: TradeAction,
   walletAddress: string,
-  registry: VaultRegistry,
-): Record<string, unknown> {
-  const vault = resolveVault(action.asset_out, registry)
+): Promise<Record<string, unknown>> {
+  const vault = await resolveVaultByAsset(action.asset_out)
 
   if (!vault.loanBrokerId || !vault.loanBrokerAccount) {
     throw new Error(
@@ -206,45 +220,48 @@ function buildBorrowTx(
   }
 }
 
-/**
- * Build XRPL transactions from strategy trade_actions and submit them
- * sequentially via the provided signAndSubmit function.
- */
 export async function buildAndSubmitStrategy(
   strategy: Strategy,
   walletAddress: string,
   signAndSubmit: SignAndSubmitFn,
-  poolRegistry: PoolRegistry,
-  vaultRegistry: VaultRegistry,
 ): Promise<{ txHash: string; status: string }> {
-  if (!walletAddress) {
-    throw new Error('No wallet address - connect a wallet first')
+  const support = getStrategyExecutionSupport(strategy)
+  if (!support.executable) {
+    throw new Error(support.reason ?? 'This strategy is not executable.')
   }
 
-  if (strategy.trade_actions.length === 0) {
-    throw new Error('Strategy has no trade actions to execute')
+  console.debug('[xrplTransactions] buildAndSubmitStrategy start', {
+    strategyId: strategy.id,
+    title: strategy.title,
+    walletAddress,
+    tradeActions: strategy.trade_actions,
+  })
+
+  if (!walletAddress) {
+    throw new Error('No wallet address - connect a wallet first')
   }
 
   const prepared: Array<{ action: TradeAction['action']; tx: Record<string, unknown> }> = []
 
   for (const action of strategy.trade_actions) {
     let tx: Record<string, unknown>
+    console.debug('[xrplTransactions] preparing action', action)
 
     switch (action.action) {
       case 'swap':
-        tx = buildSwapTx(action, walletAddress, poolRegistry)
+        tx = buildSwapTx(action, walletAddress)
         break
       case 'deposit':
-        tx = buildDepositTx(action, walletAddress, poolRegistry)
+        tx = buildDepositTx(action, walletAddress)
         break
       case 'withdraw':
-        tx = buildWithdrawTx(action, walletAddress, poolRegistry)
+        tx = buildWithdrawTx(action, walletAddress)
         break
       case 'lend':
-        tx = buildLendTx(action, walletAddress, vaultRegistry)
+        tx = await buildLendTx(action, walletAddress)
         break
       case 'borrow':
-        tx = buildBorrowTx(action, walletAddress, vaultRegistry)
+        tx = await buildBorrowTx(action, walletAddress)
         throw new Error(
           `Borrow action prepared a LoanSet for broker ${(tx.LoanBrokerID as string) ?? 'unknown'}, but submitting it still requires the loan broker's first signature before your wallet can counter-sign.`,
         )
@@ -252,6 +269,10 @@ export async function buildAndSubmitStrategy(
         throw new Error(`Unknown action type: ${(action as TradeAction).action}`)
     }
 
+    console.debug('[xrplTransactions] prepared tx', {
+      action: action.action,
+      tx,
+    })
     prepared.push({ action: action.action, tx })
   }
 
@@ -259,9 +280,19 @@ export async function buildAndSubmitStrategy(
 
   for (const item of prepared) {
     try {
+      console.debug('[xrplTransactions] submitting tx', item)
       const result = await signAndSubmit(item.tx)
+      console.debug('[xrplTransactions] submit result', {
+        action: item.action,
+        hash: result.hash,
+        status: result.status,
+      })
       results.push({ hash: result.hash, action: item.action })
     } catch (err) {
+      console.error('[xrplTransactions] submit failed', {
+        action: item.action,
+        error: err instanceof Error ? err.message : err,
+      })
       throw new Error(
         `Transaction failed on "${item.action}" action: ${err instanceof Error ? err.message : 'Unknown error'}`,
       )
