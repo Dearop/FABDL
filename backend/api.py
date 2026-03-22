@@ -125,7 +125,70 @@ DECISION METRICS — use these when lending/borrowing data is present in the por
 
 ALLOWED_ASSETS = {"XRP", "USD", "BTC", "ETH", "USDC", "USDT"}
 ALLOWED_ACTIONS = {"swap", "deposit", "withdraw", "lend", "borrow"}
+ALLOWED_ACTIONS_TESTNET = {"swap", "deposit", "withdraw"}  # No lending on testnet
 ALLOWED_DEPOSIT_MODES = {"single_asset", "two_asset", None}
+
+# Testnet system prompt: AMM LP only, no lending/borrowing
+CLAUDE_SYSTEM_PROMPT_TESTNET = """You are VEGA, a quantitative trading strategist specializing in XRPL's native AMM (constant-product, Uniswap v2-style).
+
+CONTEXT:
+- XRPL AMM uses x*y=k formula. Each pool holds exactly 2 assets. At most one can be XRP.
+- Deposit modes: "single_asset" (deposit one side, incurs fee) or "two_asset" (proportional, no fee).
+- Withdraw modes mirror deposits. Swaps go through the AMM pool.
+- IMPORTANT: You are operating on XRPL TESTNET. Lending and borrowing are NOT available.
+- Only recommend AMM liquidity provision strategies: swap, deposit, withdraw.
+
+YOUR ROLE:
+1. Analyze the portfolio risk metrics provided
+2. Generate EXACTLY 3 strategies: one conservative, one yield-focused, one "Do Nothing"
+3. Explain trade-offs in plain language (no jargon — say "directional exposure" not "delta")
+4. Provide numerical projections based on the risk data
+
+HARD CONSTRAINTS:
+- Cap risk_score at 8 (integer, 1-8 scale)
+- Never recommend estimated_slippage > 1.0 (percent)
+- Only use these assets: XRP, USD, BTC, ETH, USDC, USDT
+- ONLY use these actions: swap, deposit, withdraw — NO lend or borrow
+- Max 50 words per strategy description
+- "Do Nothing" must always be option_c with risk_score 1-4 and empty trade_actions
+- Generate exactly 3 strategies so validation always passes
+
+OUTPUT: Return ONLY this JSON. No prose, no markdown fences, no explanation before or after.
+{
+  "strategies": [
+    {
+      "id": "option_a",
+      "title": "string",
+      "description": "string (max 50 words)",
+      "risk_score": integer (1-8),
+      "projected_return_7d": {
+        "best_case": "$XXX",
+        "expected": "$XXX",
+        "worst_case": "-$XXX"
+      },
+      "trade_actions": [
+        {
+          "action": "swap" | "deposit" | "withdraw",
+          "asset_in": "XRP" | "USD" | "BTC" | "ETH" | "USDC" | "USDT",
+          "asset_out": "XRP" | "USD" | "BTC" | "ETH" | "USDC" | "USDT",
+          "amount": number,
+          "amount2": number or null (for two-asset deposits only),
+          "estimated_slippage": number (0 to 1.0, percent),
+          "pool": "ASSET1/ASSET2" (e.g. "XRP/USD"),
+          "deposit_mode": "single_asset" | "two_asset" | null
+        }
+      ],
+      "pros": ["string", "string"],
+      "cons": ["string", "string"]
+    }
+  ]
+}
+
+STRATEGY TAXONOMY:
+- option_a: Conservative — capital preservation, hedging, low risk (risk_score 1-3)
+- option_b: Yield-Focused — AMM LP fee maximization, deposits, moderate-high risk (risk_score 4-8)
+- option_c: Do Nothing — hold current position, zero trade actions (risk_score 1-4)
+"""
 
 
 def _log_json(label: str, payload: object) -> None:
@@ -144,6 +207,8 @@ class WalletConnectRequest(BaseModel):
 class QueryRequest(BaseModel):
     user_query: str
     wallet_id: str
+    network: str = "devnet"
+    available_pools: list[str] = []  # e.g. ["XRP/USD", "XRP/BTC"] — discovered on-chain
 
 class Parameter(BaseModel):
     key: str
@@ -263,7 +328,7 @@ async def _call_rust_backend(intent_payload: dict) -> str:
     return response.text
 
 
-async def _call_claude(prompt_text: str) -> dict:
+async def _call_claude(prompt_text: str, system_override: str | None = None) -> dict:
     """
     Send the Rust-rendered prompt string to Claude Sonnet as the user message.
     Returns the parsed JSON response dict.
@@ -274,6 +339,7 @@ async def _call_claude(prompt_text: str) -> dict:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY environment variable is not set")
 
     client = _anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    system = system_override or CLAUDE_SYSTEM_PROMPT
 
     print(f"  [Backend] Calling Claude claude-sonnet-4-6...")
 
@@ -281,7 +347,7 @@ async def _call_claude(prompt_text: str) -> dict:
         return client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1024,
-            system=CLAUDE_SYSTEM_PROMPT,
+            system=system,
             messages=[{"role": "user", "content": prompt_text}],
         )
 
@@ -301,8 +367,9 @@ async def _call_claude(prompt_text: str) -> dict:
         raise HTTPException(status_code=500, detail="Claude returned invalid JSON")
 
 
-def _validate_strategy(s: dict) -> bool:
+def _validate_strategy(s: dict, network: str = "lend-devnet") -> bool:
     """Enforce safety guardrails."""
+    allowed_actions = ALLOWED_ACTIONS_TESTNET if network == "testnet" else ALLOWED_ACTIONS
     required = {"id", "title", "description", "risk_score"}
     if not required.issubset(s.keys()):
         print(f"  [Validation] Missing required fields: {required - set(s.keys())}")
@@ -324,8 +391,8 @@ def _validate_strategy(s: dict) -> bool:
         if action.get("estimated_slippage", 0) > 1.0:
             print(f"  [Validation] Slippage too high: {action.get('estimated_slippage')}")
             return False
-        if action.get("action") and action["action"] not in ALLOWED_ACTIONS:
-            print(f"  [Validation] Unknown action type: {action.get('action')}")
+        if action.get("action") and action["action"] not in allowed_actions:
+            print(f"  [Validation] Disallowed action for network={network}: {action.get('action')}")
             return False
         for key in ("asset_in", "asset_out"):
             if action.get(key) and action[key] not in ALLOWED_ASSETS:
@@ -364,19 +431,66 @@ def _ensure_demo_executable_strategy(strategies: list) -> list:
     return normalized[:3]
 
 
-def _validate_and_filter_strategies(claude_response: dict) -> list:
+def _validate_and_filter_strategies(claude_response: dict, network: str = "lend-devnet") -> list:
     strategies = claude_response.get("strategies", [])
     _log_json("  [Backend] Claude strategies before validation", strategies)
-    valid = [s for s in strategies if _validate_strategy(s)]
+    valid = [s for s in strategies if _validate_strategy(s, network)]
     if len(valid) < 2:
         print(f"  [Backend] Only {len(valid)} strategies passed validation - using fallback")
-        return _fallback_strategies()
-    valid = _ensure_demo_executable_strategy(valid)
+        return _fallback_strategies(network)
+    if network != "testnet":
+        valid = _ensure_demo_executable_strategy(valid)
     _log_json("  [Backend] Strategies after validation", valid)
     return valid
 
 
-def _fallback_strategies() -> list:
+def _fallback_strategies_testnet() -> list:
+    """AMM-only fallback strategies for testnet (no lending)."""
+    return [
+        {
+            "id": "option_a",
+            "title": "Conservative: Single-Asset XRP Deposit",
+            "description": "Deposit XRP into the XRP/USD AMM pool as a single-asset deposit. Earn trading fees with moderate IL exposure.",
+            "risk_score": 3,
+            "projected_return_7d": {"best_case": "$12", "expected": "$5", "worst_case": "-$8"},
+            "trade_actions": [
+                {"action": "deposit", "asset_in": "XRP", "asset_out": "USD", "amount": 50, "estimated_slippage": 0.3, "pool": "XRP/USD", "deposit_mode": "single_asset", "amount2": None, "interest_rate": None, "term_days": None}
+            ],
+            "pros": ["Earn AMM trading fees", "Simple single-asset entry"],
+            "cons": ["Impermanent loss if XRP moves significantly", "Single-asset fee on deposit"],
+        },
+        {
+            "id": "option_b",
+            "title": "Yield: Two-Asset LP Deposit",
+            "description": "Proportional two-asset deposit into XRP/USD pool. No deposit fee. Maximizes fee earning from balanced LP position.",
+            "risk_score": 5,
+            "projected_return_7d": {"best_case": "$20", "expected": "$10", "worst_case": "-$15"},
+            "trade_actions": [
+                {"action": "deposit", "asset_in": "XRP", "asset_out": "USD", "amount": 50, "estimated_slippage": 0.1, "pool": "XRP/USD", "deposit_mode": "two_asset", "amount2": 25, "interest_rate": None, "term_days": None}
+            ],
+            "pros": ["No deposit fee (proportional)", "Higher fee earnings from balanced position"],
+            "cons": ["Requires both assets", "IL risk on both sides"],
+        },
+        {
+            "id": "option_c",
+            "title": "Do Nothing: Hold Current Position",
+            "description": "Keep current position unchanged. Monitor fees vs. impermanent loss daily.",
+            "risk_score": 2,
+            "projected_return_7d": {"best_case": "$0", "expected": "$0", "worst_case": "$0"},
+            "trade_actions": [],
+            "pros": ["Zero transaction cost", "No action needed"],
+            "cons": ["Exposed to IL if XRP moves", "No yield if not in AMM"],
+        },
+    ]
+
+
+def _fallback_strategies(network: str = "lend-devnet") -> list:
+    if network == "testnet":
+        return _fallback_strategies_testnet()
+    return _fallback_strategies_devnet()
+
+
+def _fallback_strategies_devnet() -> list:
     return [
         {
             "id": "option_a",
@@ -553,13 +667,17 @@ async def generate_strategies(request: QueryRequest):
         print(f"\n[Backend] Step 3: Calling Rust analysis backend...")
         prompt_text = await _call_rust_backend(intent_payload)
 
-        # Step 5: Call Claude Sonnet
-        print(f"\n[Backend] Step 4: Calling Claude Sonnet...")
-        claude_response = await _call_claude(prompt_text)
+        # Step 5: Call Claude Sonnet (network-aware prompt)
+        is_testnet = request.network == "testnet"
+        print(f"\n[Backend] Step 4: Calling Claude Sonnet (network={request.network})...")
+        claude_response = await _call_claude(
+            prompt_text,
+            system_override=CLAUDE_SYSTEM_PROMPT_TESTNET if is_testnet else None,
+        )
 
         # Step 6: Validate and filter strategies
         print(f"\n[Backend] Step 5: Validating strategies...")
-        strategies = _validate_and_filter_strategies(claude_response)
+        strategies = _validate_and_filter_strategies(claude_response, request.network)
         print(f"  {len(strategies)} strategies passed validation")
 
         print(f"\n[Backend] /strategies/generate complete\n")
@@ -636,6 +754,23 @@ Calling route_intent is optional — use it only if the user query is ambiguous.
 """
 )
 
+_MCP_SYSTEM_PROMPT_TESTNET = (
+    CLAUDE_SYSTEM_PROMPT_TESTNET
+    + """
+
+ORCHESTRATION INSTRUCTIONS:
+You are operating in tool-use mode on XRPL TESTNET. Before generating strategies you MUST:
+1. Call analyze_portfolio with the wallet_id to get risk metrics.
+2. Once you have the data, output the strategies JSON (same schema as above). Do not call tools after you have enough data.
+3. IMPORTANT: Do NOT use get_lending_context — lending is not available on testnet.
+4. Only recommend AMM LP actions: swap, deposit, withdraw.
+Calling route_intent is optional — use it only if the user query is ambiguous.
+"""
+)
+
+# MCP tools without lending context (for testnet)
+_MCP_TOOLS_TESTNET = [t for t in _MCP_TOOLS if t["name"] != "get_lending_context"]
+
 
 async def _execute_mcp_tool(tool_name: str, tool_input: dict, wallet_id: str) -> dict:
     """Execute a single MCP tool call in-process (mirrors mcp-server implementations)."""
@@ -707,26 +842,44 @@ async def generate_strategies_mcp(request: QueryRequest):
     if not ANTHROPIC_API_KEY:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
 
+    is_testnet = request.network == "testnet"
+    system_prompt = _MCP_SYSTEM_PROMPT_TESTNET if is_testnet else _MCP_SYSTEM_PROMPT
+    tools = _MCP_TOOLS_TESTNET if is_testnet else _MCP_TOOLS
+
+    # Inject available pools constraint into system prompt
+    if request.available_pools:
+        pool_list = ", ".join(request.available_pools)
+        pool_constraint = (
+            f"\n\nAVAILABLE AMM POOLS (discovered on-chain): {pool_list}\n"
+            f"IMPORTANT: You MUST ONLY use pools from this list in trade_actions. "
+            f"Do NOT reference pools that are not in this list — they do not exist on the current network."
+        )
+        system_prompt = system_prompt + pool_constraint
+
     client = _anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+    pool_info = f"\nAvailable AMM pools on-chain: {', '.join(request.available_pools)}" if request.available_pools else ""
     messages = [
         {
             "role": "user",
             "content": (
                 f"User query: {request.user_query}\n"
-                f"Wallet address: {request.wallet_id}\n\n"
+                f"Wallet address: {request.wallet_id}\n"
+                f"Network: {request.network}\n"
+                f"{pool_info}\n\n"
                 "Gather the necessary data using the available tools, then return the strategies JSON."
             ),
         }
     ]
 
-    print(f"\n[MCP] /strategies/generate-mcp  wallet={request.wallet_id}  query='{request.user_query}'")
+    print(f"\n[MCP] /strategies/generate-mcp  wallet={request.wallet_id}  network={request.network}  pools={request.available_pools}  query='{request.user_query}'")
 
     def _sync_create(msgs):
         return client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=4096,
-            system=_MCP_SYSTEM_PROMPT,
-            tools=_MCP_TOOLS,
+            system=system_prompt,
+            tools=tools,
             messages=msgs,
         )
 
@@ -748,7 +901,7 @@ async def generate_strategies_mcp(request: QueryRequest):
                 claude_response = json.loads(final_text)
             except json.JSONDecodeError:
                 raise HTTPException(status_code=500, detail="Claude MCP response was not valid JSON")
-            strategies = _validate_and_filter_strategies(claude_response)
+            strategies = _validate_and_filter_strategies(claude_response, request.network)
             print(f"  [MCP] {len(strategies)} strategies validated\n")
             return {"strategies": strategies, "wallet_id": request.wallet_id, "mode": "mcp"}
 

@@ -6,13 +6,17 @@
  */
 
 import type { Strategy, TradeAction } from '@/lib/types'
-import type { SignAndSubmitFn } from '@/lib/wallet-providers'
+import type { SignAndSubmitFn, XrplNetwork } from '@/lib/wallet-providers'
 import {
   isPoolConfigured,
   normalizePoolLabel,
   resolveConfiguredPool,
   type PoolAsset,
 } from '@/services/poolRegistry'
+import {
+  isDiscoveredPool,
+  resolveDiscoveredPool,
+} from '@/services/ammDiscovery'
 import {
   isVaultSupportedForExecution,
   resolveVaultByAsset,
@@ -21,6 +25,13 @@ import {
 export interface StrategyExecutionSupport {
   executable: boolean
   reason?: string
+}
+
+export interface StrategyExecutionResult {
+  txHash: string
+  status: 'success'
+  results: Array<{ action: string; hash: string }>
+  network: XrplNetwork
 }
 
 function toDrops(xrpAmount: number): string {
@@ -45,9 +56,22 @@ function unsupported(reason: string): StrategyExecutionSupport {
   return { executable: false, reason }
 }
 
-function getActionExecutionSupport(action: TradeAction): StrategyExecutionSupport {
+/** Resolve a pool: prefer live discovered pools, fall back to static registry. */
+function resolvePool(pool: string): { asset1: PoolAsset; asset2: PoolAsset } {
+  if (isDiscoveredPool(pool)) {
+    const discovered = resolveDiscoveredPool(pool)
+    return { asset1: discovered.asset1, asset2: discovered.asset2 }
+  }
+  const configured = resolveConfiguredPool(pool)
+  return { asset1: configured.asset1, asset2: configured.asset2 }
+}
+
+function getActionExecutionSupport(action: TradeAction, network: XrplNetwork = 'lend-devnet'): StrategyExecutionSupport {
   switch (action.action) {
     case 'lend':
+      if (network === 'testnet') {
+        return unsupported('Lending is not available on XRPL Testnet.')
+      }
       if (!isVaultSupportedForExecution(action.asset_in)) {
         return unsupported(
           `Live vault execution is currently enabled only for XRP and USD. Unsupported lending asset: ${action.asset_in.toUpperCase()}.`,
@@ -56,6 +80,9 @@ function getActionExecutionSupport(action: TradeAction): StrategyExecutionSuppor
       return { executable: true }
 
     case 'borrow':
+      if (network === 'testnet') {
+        return unsupported('Borrowing is not available on XRPL Testnet.')
+      }
       return unsupported(
         'Borrow execution is disabled in the demo until the loan broker signs first.',
       )
@@ -67,14 +94,15 @@ function getActionExecutionSupport(action: TradeAction): StrategyExecutionSuppor
         return unsupported(`${action.action} action is missing a pool label.`)
       }
       try {
-        const normalized = normalizePoolLabel(action.pool)
-        if (!isPoolConfigured(action.pool)) {
-          return unsupported(
-            `AMM pool "${normalized}" is not configured for live lending-devnet execution.`,
-          )
-        }
+        normalizePoolLabel(action.pool) // validate format
       } catch (error) {
         return unsupported(error instanceof Error ? error.message : 'Invalid AMM pool label.')
+      }
+      // Check discovered pools first, fall back to static registry
+      if (!isDiscoveredPool(action.pool) && !isPoolConfigured(action.pool)) {
+        return unsupported(
+          `AMM pool "${normalizePoolLabel(action.pool)}" was not found on-chain. It may not exist on the current network.`,
+        )
       }
       return { executable: true }
 
@@ -83,13 +111,13 @@ function getActionExecutionSupport(action: TradeAction): StrategyExecutionSuppor
   }
 }
 
-export function getStrategyExecutionSupport(strategy: Strategy): StrategyExecutionSupport {
+export function getStrategyExecutionSupport(strategy: Strategy, network: XrplNetwork = 'lend-devnet'): StrategyExecutionSupport {
   if (strategy.trade_actions.length === 0) {
     return unsupported('This strategy has no on-chain transactions to sign.')
   }
 
   for (const action of strategy.trade_actions) {
-    const support = getActionExecutionSupport(action)
+    const support = getActionExecutionSupport(action, network)
     if (!support.executable) return support
   }
 
@@ -103,7 +131,7 @@ function buildSwapTx(
   const pool = action.pool
   if (!pool) throw new Error('Swap action missing pool field')
 
-  const { asset1, asset2 } = resolveConfiguredPool(pool)
+  const { asset1, asset2 } = resolvePool(pool)
 
   const assetIn = action.asset_in.toUpperCase() === 'XRP' ||
     asset1.currency === action.asset_in.toUpperCase()
@@ -130,7 +158,7 @@ function buildDepositTx(
   const pool = action.pool
   if (!pool) throw new Error('Deposit action missing pool field')
 
-  const { asset1, asset2 } = resolveConfiguredPool(pool)
+  const { asset1, asset2 } = resolvePool(pool)
   const flags = action.deposit_mode === 'two_asset' ? 1048576 : 524288
 
   const tx: Record<string, unknown> = {
@@ -162,7 +190,7 @@ function buildWithdrawTx(
   const pool = action.pool
   if (!pool) throw new Error('Withdraw action missing pool field')
 
-  const { asset1, asset2 } = resolveConfiguredPool(pool)
+  const { asset1, asset2 } = resolvePool(pool)
 
   return {
     TransactionType: 'AMMWithdraw',
@@ -224,8 +252,9 @@ export async function buildAndSubmitStrategy(
   strategy: Strategy,
   walletAddress: string,
   signAndSubmit: SignAndSubmitFn,
-): Promise<{ txHash: string; status: string }> {
-  const support = getStrategyExecutionSupport(strategy)
+  network: XrplNetwork = 'lend-devnet',
+): Promise<StrategyExecutionResult> {
+  const support = getStrategyExecutionSupport(strategy, network)
   if (!support.executable) {
     throw new Error(support.reason ?? 'This strategy is not executable.')
   }
@@ -234,6 +263,7 @@ export async function buildAndSubmitStrategy(
     strategyId: strategy.id,
     title: strategy.title,
     walletAddress,
+    network,
     tradeActions: strategy.trade_actions,
   })
 
@@ -285,7 +315,6 @@ export async function buildAndSubmitStrategy(
       console.debug('[xrplTransactions] submit result', {
         action: item.action,
         hash: result.hash,
-        status: result.status,
       })
       results.push({ hash: result.hash, action: item.action })
     } catch (err) {
@@ -302,5 +331,7 @@ export async function buildAndSubmitStrategy(
   return {
     txHash: results[results.length - 1].hash,
     status: 'success',
+    results,
+    network,
   }
 }

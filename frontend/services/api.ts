@@ -62,22 +62,33 @@ export async function classifyQuery(query: string, walletId: string) {
 }
 
 /**
- * Generate 3 trading strategies based on a user query
- * This is the MCP-orchestrated workflow endpoint
+ * Generate 3 trading strategies based on a user query.
+ *
+ * @param network      - current XRPL network label
+ * @param availablePools - pool labels discovered on-chain (e.g. ["XRP/USD","XRP/BTC"])
  */
 export async function generateStrategies(
   query: string,
-  walletId: string
+  walletId: string,
+  network: string = 'devnet',
+  availablePools: string[] = [],
 ): Promise<GenerateStrategiesResponse> {
   console.debug('[frontend/api] generateStrategies request', {
     endpoint: `${API_BASE}/strategies/generate-mcp`,
     walletId,
     query,
+    network,
+    availablePools,
   })
   const response = await fetch(`${API_BASE}/strategies/generate-mcp`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_query: query, wallet_id: walletId })
+    body: JSON.stringify({
+      user_query: query,
+      wallet_id: walletId,
+      network,
+      available_pools: availablePools,
+    }),
   })
 
   if (!response.ok) {
