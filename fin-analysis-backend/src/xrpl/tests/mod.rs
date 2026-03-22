@@ -6,6 +6,7 @@ use crate::{
     error::AnalysisError,
     types::{
         pool::{PoolSnapshot, PricePoint},
+        quant::{LendingVaultSnapshot, LoanPosition},
         xrpl::{
             AccountLinesResponse, AccountTxResponse, AmountField, AmmInfo, AmmInfoResponse,
             LpTokenInfo, TrustLine,
@@ -111,6 +112,23 @@ impl XrplClient for MockXrplClient {
             })
             .collect();
         Ok(points)
+    }
+
+    async fn lending_vault_info(
+        &self,
+        asset: &str,
+    ) -> Result<LendingVaultSnapshot, AnalysisError> {
+        Ok(LendingVaultSnapshot {
+            asset: asset.to_string(),
+            ..Default::default()
+        })
+    }
+
+    async fn account_loans(
+        &self,
+        _wallet: &str,
+    ) -> Result<Vec<LoanPosition>, AnalysisError> {
+        Ok(vec![])
     }
 
     async fn fetch_pool_snapshot(

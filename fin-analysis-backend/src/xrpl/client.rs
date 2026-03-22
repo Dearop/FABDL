@@ -11,6 +11,7 @@ use crate::{
     error::AnalysisError,
     types::{
         pool::{PoolSnapshot, PricePoint},
+        quant::{LendingVaultSnapshot, LoanPosition},
         xrpl::{AccountLinesResponse, AccountTxResponse, AmmInfoResponse},
     },
 };
@@ -114,5 +115,161 @@ impl XrplClient for HttpXrplClient {
         pool_label: &str,
     ) -> Result<PoolSnapshot, AnalysisError> {
         amm::build_pool_snapshot(self, wallet, pool_label).await
+    }
+
+    async fn lending_vault_info(
+        &self,
+        asset: &str,
+    ) -> Result<LendingVaultSnapshot, AnalysisError> {
+        let params = json!({
+            "ledger_entry": {
+                "LendingPool": {
+                    "asset": { "currency": asset }
+                }
+            }
+        });
+
+        let result = match self.rpc("ledger_entry", params).await {
+            Ok(r) => r,
+            Err(_) => {
+                return Ok(LendingVaultSnapshot {
+                    asset: asset.to_string(),
+                    ..Default::default()
+                });
+            }
+        };
+
+        let node = match result.get("node") {
+            Some(n) => n,
+            None => {
+                return Ok(LendingVaultSnapshot {
+                    asset: asset.to_string(),
+                    ..Default::default()
+                });
+            }
+        };
+
+        let total_supply: f64 = node
+            .get("TotalSupply")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .map(|drops: f64| drops / 1_000_000.0)
+            .unwrap_or(0.0);
+
+        let total_borrow: f64 = node
+            .get("TotalBorrow")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .map(|drops: f64| drops / 1_000_000.0)
+            .unwrap_or(0.0);
+
+        let supply_apy: f64 = node
+            .get("SupplyAPY")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+
+        let borrow_apy: f64 = node
+            .get("BorrowAPY")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+
+        let utilization_rate = if total_supply > 0.0 {
+            total_borrow / total_supply
+        } else {
+            0.0
+        };
+
+        Ok(LendingVaultSnapshot {
+            asset: asset.to_string(),
+            total_supply_usd: total_supply,
+            total_borrow_usd: total_borrow,
+            utilization_rate,
+            supply_apy,
+            borrow_apy,
+        })
+    }
+
+    async fn account_loans(
+        &self,
+        wallet: &str,
+    ) -> Result<Vec<LoanPosition>, AnalysisError> {
+        let params = json!({
+            "account": wallet,
+            "type": "loan"
+        });
+
+        let result = match self.rpc("account_objects", params).await {
+            Ok(r) => r,
+            Err(_) => return Ok(vec![]),
+        };
+
+        let objects = match result.get("account_objects").and_then(|v| v.as_array()) {
+            Some(arr) => arr,
+            None => return Ok(vec![]),
+        };
+
+        let loans = objects
+            .iter()
+            .filter_map(|obj| {
+                let asset_borrowed = obj
+                    .get("BorrowedAsset")
+                    .and_then(|v| v.get("currency"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let amount_borrowed_usd: f64 = obj
+                    .get("BorrowedAmount")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .map(|drops: f64| drops / 1_000_000.0)
+                    .unwrap_or(0.0);
+
+                let collateral_asset = obj
+                    .get("CollateralAsset")
+                    .and_then(|v| v.get("currency"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let collateral_usd: f64 = obj
+                    .get("CollateralAmount")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .map(|drops: f64| drops / 1_000_000.0)
+                    .unwrap_or(0.0);
+
+                let health_factor: f64 = obj
+                    .get("HealthFactor")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                let borrow_apy: f64 = obj
+                    .get("BorrowAPY")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                let term_days: Option<u32> = obj
+                    .get("TermDays")
+                    .and_then(|v| v.as_u64())
+                    .map(|d| d as u32);
+
+                Some(LoanPosition {
+                    asset_borrowed,
+                    amount_borrowed_usd,
+                    collateral_asset,
+                    collateral_usd,
+                    health_factor,
+                    borrow_apy,
+                    term_days,
+                })
+            })
+            .collect();
+
+        Ok(loans)
     }
 }

@@ -119,5 +119,52 @@ pub async fn run(
         return Ok(PortfolioRiskSummary::empty(xrp_price));
     }
 
-    quant.compute_portfolio_risk(&snapshots, &price_history, REPLAY_WINDOW_SECS)
+    let mut summary =
+        quant.compute_portfolio_risk(&snapshots, &price_history, REPLAY_WINDOW_SECS)?;
+
+    // -----------------------------------------------------------------------
+    // XLS-66d lending context (best-effort, never fails the request)
+    // -----------------------------------------------------------------------
+    tracing::info!(wallet, "step 6: fetching XLS-66d lending context");
+
+    // Deduplicate currencies from the user's pool snapshots.
+    let mut seen_currencies = std::collections::HashSet::new();
+    let mut vault_assets: Vec<String> = Vec::new();
+    for snap in &snapshots {
+        for part in snap.pool_label.split('/') {
+            if seen_currencies.insert(part.to_string()) {
+                vault_assets.push(part.to_string());
+            }
+        }
+    }
+
+    let mut lending_vaults = Vec::new();
+    for asset in &vault_assets {
+        let vault = xrpl
+            .lending_vault_info(asset)
+            .await
+            .unwrap_or_default();
+        // Only include vaults that actually exist (non-zero supply).
+        if vault.total_supply_usd > 0.0 {
+            lending_vaults.push(vault);
+        }
+    }
+
+    let open_loans = xrpl
+        .account_loans(wallet)
+        .await
+        .unwrap_or_default();
+
+    if !lending_vaults.is_empty() || !open_loans.is_empty() {
+        tracing::info!(
+            vaults = lending_vaults.len(),
+            loans = open_loans.len(),
+            "lending context attached"
+        );
+    }
+
+    summary.lending_vaults = lending_vaults;
+    summary.open_loans = open_loans;
+
+    Ok(summary)
 }

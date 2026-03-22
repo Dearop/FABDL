@@ -205,6 +205,8 @@ impl QuantModel for DefaultQuantModel {
             break_even_upper: be_upper,
             fee_apr,
             positions: position_risks,
+            lending_vaults: Vec::new(),
+            open_loans: Vec::new(),
         })
     }
 }

@@ -35,6 +35,44 @@ pub struct PositionRisk {
 }
 
 // ---------------------------------------------------------------------------
+// XLS-66d Lending
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LendingVaultSnapshot {
+    pub asset: String,
+    pub total_supply_usd: f64,
+    pub total_borrow_usd: f64,
+    pub utilization_rate: f64,
+    pub supply_apy: f64,
+    pub borrow_apy: f64,
+}
+
+impl Default for LendingVaultSnapshot {
+    fn default() -> Self {
+        Self {
+            asset: String::new(),
+            total_supply_usd: 0.0,
+            total_borrow_usd: 0.0,
+            utilization_rate: 0.0,
+            supply_apy: 0.0,
+            borrow_apy: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoanPosition {
+    pub asset_borrowed: String,
+    pub amount_borrowed_usd: f64,
+    pub collateral_asset: String,
+    pub collateral_usd: f64,
+    pub health_factor: f64,
+    pub borrow_apy: f64,
+    pub term_days: Option<u32>,
+}
+
+// ---------------------------------------------------------------------------
 // Portfolio-level risk summary (Quant LLM input)
 // ---------------------------------------------------------------------------
 
@@ -66,6 +104,10 @@ pub struct PortfolioRiskSummary {
     pub fee_apr: f64,
     /// Per-position breakdown.
     pub positions: Vec<PositionRisk>,
+    /// XLS-66d lending vault snapshots for assets in the user's pools.
+    pub lending_vaults: Vec<LendingVaultSnapshot>,
+    /// XLS-66d open loan positions for the user's wallet.
+    pub open_loans: Vec<LoanPosition>,
 }
 
 impl PortfolioRiskSummary {
@@ -117,6 +159,35 @@ impl PortfolioRiskSummary {
             }
         }
 
+        // Lending context (XLS-66d)
+        if !self.lending_vaults.is_empty() || !self.open_loans.is_empty() {
+            prompt.push_str("\nLending Context:\n");
+            for v in &self.lending_vaults {
+                prompt.push_str(&format!(
+                    "- Vault {asset}: supply APY {supply:.1}%, borrow APY {borrow:.1}%, utilization {util:.0}%\n",
+                    asset = v.asset,
+                    supply = v.supply_apy * 100.0,
+                    borrow = v.borrow_apy * 100.0,
+                    util = v.utilization_rate * 100.0,
+                ));
+            }
+            if !self.open_loans.is_empty() {
+                prompt.push_str("Open Loans:\n");
+                for loan in &self.open_loans {
+                    prompt.push_str(&format!(
+                        "- Borrowed {amt:.0} {asset} against {col:.0} {col_asset} collateral, \
+                         health factor {hf:.1}, borrow APY {apy:.1}%\n",
+                        amt = loan.amount_borrowed_usd,
+                        asset = loan.asset_borrowed,
+                        col = loan.collateral_usd,
+                        col_asset = loan.collateral_asset,
+                        hf = loan.health_factor,
+                        apy = loan.borrow_apy * 100.0,
+                    ));
+                }
+            }
+        }
+
         let task = if n == 1 {
             "\nTask: Generate 3 strategies to manage this position."
         } else {
@@ -142,6 +213,8 @@ impl PortfolioRiskSummary {
             break_even_upper: xrp_price,
             fee_apr: 0.0,
             positions: Vec::new(),
+            lending_vaults: Vec::new(),
+            open_loans: Vec::new(),
         }
     }
 }

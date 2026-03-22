@@ -84,6 +84,8 @@ fn round_trip_portfolio_risk_summary() {
             var_95_usd: 800.0,
             lp_share_pct: 0.025,
         }],
+        lending_vaults: Vec::new(),
+        open_loans: Vec::new(),
     };
 
     let json = serde_json::to_string(&summary).unwrap();

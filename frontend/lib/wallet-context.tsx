@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
-import type { WalletInfo, AppStatus, Strategy, ExecutionSummary } from './types'
+import type { WalletInfo, AppStatus, Strategy } from './types'
 
 interface WalletContextType {
   wallet: WalletInfo | null
@@ -9,7 +9,6 @@ interface WalletContextType {
   strategies: Strategy[]
   selectedStrategy: Strategy | null
   txHash: string | null
-  executionSummary: ExecutionSummary | null
   error: string | null
   lastQuery: string
   connectWallet: (address: string) => Promise<void>
@@ -18,7 +17,6 @@ interface WalletContextType {
   setStrategies: (strategies: Strategy[]) => void
   setSelectedStrategy: (strategy: Strategy | null) => void
   setTxHash: (hash: string | null) => void
-  setExecutionSummary: (summary: ExecutionSummary | null) => void
   setError: (error: string | null) => void
   setLastQuery: (query: string) => void
   resetToReady: () => void
@@ -32,7 +30,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [strategies, setStrategies] = useState<Strategy[]>([])
   const [selectedStrategy, setSelectedStrategy] = useState<Strategy | null>(null)
   const [txHash, setTxHash] = useState<string | null>(null)
-  const [executionSummary, setExecutionSummary] = useState<ExecutionSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [lastQuery, setLastQuery] = useState('')
 
@@ -60,7 +57,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setStrategies([])
     setSelectedStrategy(null)
     setTxHash(null)
-    setExecutionSummary(null)
     setError(null)
     setLastQuery('')
   }, [])
@@ -70,7 +66,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setStrategies([])
     setSelectedStrategy(null)
     setTxHash(null)
-    setExecutionSummary(null)
     setError(null)
     setLastQuery('')
   }, [])
@@ -83,7 +78,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         strategies,
         selectedStrategy,
         txHash,
-        executionSummary,
         error,
         lastQuery,
         connectWallet,
@@ -92,7 +86,6 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         setStrategies,
         setSelectedStrategy,
         setTxHash,
-        setExecutionSummary,
         setError,
         setLastQuery,
         resetToReady
