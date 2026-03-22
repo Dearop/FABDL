@@ -6,10 +6,7 @@ from typing_extensions import Literal
 from ..model import Model
 from ..._models import BaseModel
 from .beta_usage import BetaUsage
-from .beta_container import BetaContainer
-from .beta_stop_reason import BetaStopReason
 from .beta_content_block import BetaContentBlock, BetaContentBlock as BetaContentBlock
-from .beta_context_management_response import BetaContextManagementResponse
 
 __all__ = ["BetaMessage"]
 
@@ -19,12 +16,6 @@ class BetaMessage(BaseModel):
     """Unique object identifier.
 
     The format and length of IDs may change over time.
-    """
-
-    container: Optional[BetaContainer] = None
-    """
-    Information about the container used in the request (for the code execution
-    tool)
     """
 
     content: List[BetaContentBlock]
@@ -62,12 +53,6 @@ class BetaMessage(BaseModel):
     ```
     """
 
-    context_management: Optional[BetaContextManagementResponse] = None
-    """Context management response.
-
-    Information about context management strategies applied during the request.
-    """
-
     model: Model
     """
     The model that will complete your prompt.\n\nSee
@@ -81,7 +66,7 @@ class BetaMessage(BaseModel):
     This will always be `"assistant"`.
     """
 
-    stop_reason: Optional[BetaStopReason] = None
+    stop_reason: Optional[Literal["end_turn", "max_tokens", "stop_sequence", "tool_use"]] = None
     """The reason that we stopped.
 
     This may be one the following values:
@@ -90,10 +75,6 @@ class BetaMessage(BaseModel):
     - `"max_tokens"`: we exceeded the requested `max_tokens` or the model's maximum
     - `"stop_sequence"`: one of your provided custom `stop_sequences` was generated
     - `"tool_use"`: the model invoked one or more tools
-    - `"pause_turn"`: we paused a long-running turn. You may provide the response
-      back as-is in a subsequent request to let the model continue.
-    - `"refusal"`: when streaming classifiers intervene to handle potential policy
-      violations
 
     In non-streaming mode this value is always non-null. In streaming mode, it is
     null in the `message_start` event and non-null otherwise.

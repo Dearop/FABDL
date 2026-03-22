@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import warnings
-from typing import Type, Union, Iterable, Optional, cast
+from typing import List, Union, Iterable
 from functools import partial
 from typing_extensions import Literal, overload
 
 import httpx
-import pydantic
 
 from ... import _legacy_response
 from ...types import (
@@ -24,33 +23,30 @@ from .batches import (
     BatchesWithStreamingResponse,
     AsyncBatchesWithStreamingResponse,
 )
-from ..._types import NOT_GIVEN, Body, Omit, Query, Headers, NotGiven, SequenceNotStr, omit, not_given
-from ..._utils import is_given, required_args, maybe_transform, async_maybe_transform
+from ..._types import NOT_GIVEN, Body, Query, Headers, NotGiven
+from ..._utils import (
+    is_given,
+    required_args,
+    maybe_transform,
+    async_maybe_transform,
+)
 from ..._compat import cached_property
-from ..._models import TypeAdapter
 from ..._resource import SyncAPIResource, AsyncAPIResource
 from ..._response import to_streamed_response_wrapper, async_to_streamed_response_wrapper
-from ..._constants import DEFAULT_TIMEOUT, MODEL_NONSTREAMING_TOKENS
+from ..._constants import DEFAULT_TIMEOUT
 from ..._streaming import Stream, AsyncStream
 from ..._base_client import make_request_options
-from ..._utils._utils import is_dict
 from ...lib.streaming import MessageStreamManager, AsyncMessageStreamManager
 from ...types.message import Message
 from ...types.model_param import ModelParam
 from ...types.message_param import MessageParam
-from ...lib._parse._response import ResponseFormatT, parse_response
 from ...types.metadata_param import MetadataParam
-from ...types.parsed_message import ParsedMessage
-from ...lib._parse._transform import transform_schema
 from ...types.text_block_param import TextBlockParam
 from ...types.tool_union_param import ToolUnionParam
 from ...types.tool_choice_param import ToolChoiceParam
-from ...types.output_config_param import OutputConfigParam
 from ...types.message_tokens_count import MessageTokensCount
 from ...types.thinking_config_param import ThinkingConfigParam
-from ...types.json_output_format_param import JSONOutputFormatParam
 from ...types.raw_message_stream_event import RawMessageStreamEvent
-from ...types.cache_control_ephemeral_param import CacheControlEphemeralParam
 from ...types.message_count_tokens_tool_param import MessageCountTokensToolParam
 
 __all__ = ["Messages", "AsyncMessages"]
@@ -63,16 +59,9 @@ DEPRECATED_MODELS = {
     "claude-instant-1.1-100k": "November 6th, 2024",
     "claude-instant-1.2": "November 6th, 2024",
     "claude-3-sonnet-20240229": "July 21st, 2025",
-    "claude-3-opus-20240229": "January 5th, 2026",
     "claude-2.1": "July 21st, 2025",
     "claude-2.0": "July 21st, 2025",
-    "claude-3-7-sonnet-latest": "February 19th, 2026",
-    "claude-3-7-sonnet-20250219": "February 19th, 2026",
-    "claude-3-5-haiku-latest": "February 19th, 2026",
-    "claude-3-5-haiku-20241022": "February 19th, 2026",
 }
-
-MODELS_TO_WARN_WITH_THINKING_ENABLED = ["claude-opus-4-6"]
 
 
 class Messages(SyncAPIResource):
@@ -106,27 +95,22 @@ class Messages(SyncAPIResource):
         max_tokens: int,
         messages: Iterable[MessageParam],
         model: ModelParam,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Message:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -135,8 +119,7 @@ class Messages(SyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -145,7 +128,7 @@ class Messages(SyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -204,36 +187,41 @@ class Messages(SyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
               details and options.
 
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
-
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -247,13 +235,14 @@ class Messages(SyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           system: System prompt.
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -271,7 +260,7 @@ class Messages(SyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -283,12 +272,6 @@ class Messages(SyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -351,7 +334,7 @@ class Messages(SyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -389,26 +372,21 @@ class Messages(SyncAPIResource):
         messages: Iterable[MessageParam],
         model: ModelParam,
         stream: Literal[True],
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Stream[RawMessageStreamEvent]:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -417,8 +395,7 @@ class Messages(SyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -427,7 +404,7 @@ class Messages(SyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -486,14 +463,35 @@ class Messages(SyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
@@ -501,25 +499,10 @@ class Messages(SyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
-
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -535,7 +518,7 @@ class Messages(SyncAPIResource):
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -553,7 +536,7 @@ class Messages(SyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -565,12 +548,6 @@ class Messages(SyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -633,7 +610,7 @@ class Messages(SyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -671,26 +648,21 @@ class Messages(SyncAPIResource):
         messages: Iterable[MessageParam],
         model: ModelParam,
         stream: bool,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Message | Stream[RawMessageStreamEvent]:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -699,8 +671,7 @@ class Messages(SyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -709,7 +680,7 @@ class Messages(SyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -768,14 +739,35 @@ class Messages(SyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
@@ -783,25 +775,10 @@ class Messages(SyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
-
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -817,7 +794,7 @@ class Messages(SyncAPIResource):
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -835,7 +812,7 @@ class Messages(SyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -847,12 +824,6 @@ class Messages(SyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -915,7 +886,7 @@ class Messages(SyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -952,44 +923,30 @@ class Messages(SyncAPIResource):
         max_tokens: int,
         messages: Iterable[MessageParam],
         model: ModelParam,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | Literal[True] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Message | Stream[RawMessageStreamEvent]:
         if not stream and not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
-            timeout = self._client._calculate_nonstreaming_timeout(
-                max_tokens, MODEL_NONSTREAMING_TOKENS.get(model, None)
-            )
+            timeout = self._client._calculate_nonstreaming_timeout(max_tokens)
 
         if model in DEPRECATED_MODELS:
             warnings.warn(
                 f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
                 DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
                 stacklevel=3,
             )
 
@@ -1000,12 +957,7 @@ class Messages(SyncAPIResource):
                     "max_tokens": max_tokens,
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
-                    "container": container,
-                    "inference_geo": inference_geo,
                     "metadata": metadata,
-                    "output_config": output_config,
-                    "service_tier": service_tier,
                     "stop_sequences": stop_sequences,
                     "stream": stream,
                     "system": system,
@@ -1016,9 +968,7 @@ class Messages(SyncAPIResource):
                     "top_k": top_k,
                     "top_p": top_p,
                 },
-                message_create_params.MessageCreateParamsStreaming
-                if stream
-                else message_create_params.MessageCreateParamsNonStreaming,
+                message_create_params.MessageCreateParams,
             ),
             options=make_request_options(
                 extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
@@ -1034,28 +984,22 @@ class Messages(SyncAPIResource):
         max_tokens: int,
         messages: Iterable[MessageParam],
         model: ModelParam,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        output_format: None | JSONOutputFormatParam | type[ResponseFormatT] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> MessageStreamManager[ResponseFormatT]:
+    ) -> MessageStreamManager:
         """Create a Message stream"""
         if model in DEPRECATED_MODELS:
             warnings.warn(
@@ -1064,47 +1008,10 @@ class Messages(SyncAPIResource):
                 stacklevel=3,
             )
 
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
         extra_headers = {
-            "X-Stainless-Helper-Method": "stream",
             "X-Stainless-Stream-Helper": "messages",
             **(extra_headers or {}),
         }
-
-        transformed_output_format: Optional[JSONOutputFormatParam] | NotGiven = NOT_GIVEN
-
-        if is_dict(output_format):
-            transformed_output_format = cast(JSONOutputFormatParam, output_format)
-        elif is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[ResponseFormatT] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = JSONOutputFormatParam(schema=transform_schema(schema), type="json_schema")
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-        # Merge output_format into output_config
-        merged_output_config: OutputConfigParam | Omit = omit
-        if is_given(transformed_output_format):
-            if is_given(output_config):
-                merged_output_config = {**output_config, "format": transformed_output_format}
-            else:
-                merged_output_config = {"format": transformed_output_format}
-        elif is_given(output_config):
-            merged_output_config = output_config
-
         make_request = partial(
             self._post,
             "/v1/messages",
@@ -1113,12 +1020,7 @@ class Messages(SyncAPIResource):
                     "max_tokens": max_tokens,
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
-                    "inference_geo": inference_geo,
                     "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "container": container,
-                    "service_tier": service_tier,
                     "stop_sequences": stop_sequences,
                     "system": system,
                     "temperature": temperature,
@@ -1138,147 +1040,23 @@ class Messages(SyncAPIResource):
             stream=True,
             stream_cls=Stream[RawMessageStreamEvent],
         )
-        return MessageStreamManager(
-            make_request,
-            output_format=NOT_GIVEN if is_dict(output_format) else cast(ResponseFormatT, output_format),
-        )
-
-    def parse(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[MessageParam],
-        model: ModelParam,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> ParsedMessage[ResponseFormatT]:
-        if not stream and not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
-            timeout = self._client._calculate_nonstreaming_timeout(
-                max_tokens, MODEL_NONSTREAMING_TOKENS.get(model, None)
-            )
-
-        if model in DEPRECATED_MODELS:
-            warnings.warn(
-                f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
-        extra_headers = {
-            "X-Stainless-Helper": "messages.parse",
-            **(extra_headers or {}),
-        }
-
-        transformed_output_format: Optional[JSONOutputFormatParam] | NotGiven = NOT_GIVEN
-
-        if is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[ResponseFormatT] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = JSONOutputFormatParam(schema=transform_schema(schema), type="json_schema")
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-        def parser(response: Message) -> ParsedMessage[ResponseFormatT]:
-            return parse_response(
-                response=response,
-                output_format=cast(
-                    ResponseFormatT,
-                    output_format if is_given(output_format) and output_format is not None else NOT_GIVEN,
-                ),
-            )
-
-        # Merge output_format into output_config
-        merged_output_config: OutputConfigParam | Omit = omit
-        if is_given(transformed_output_format):
-            if is_given(output_config):
-                merged_output_config = {**output_config, "format": transformed_output_format}
-            else:
-                merged_output_config = {"format": transformed_output_format}
-        elif is_given(output_config):
-            merged_output_config = output_config
-
-        return self._post(
-            "/v1/messages",
-            body=maybe_transform(
-                {
-                    "max_tokens": max_tokens,
-                    "messages": messages,
-                    "model": model,
-                    "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "service_tier": service_tier,
-                    "stop_sequences": stop_sequences,
-                    "stream": stream,
-                    "system": system,
-                    "temperature": temperature,
-                    "thinking": thinking,
-                    "tool_choice": tool_choice,
-                    "tools": tools,
-                    "top_k": top_k,
-                    "top_p": top_p,
-                },
-                message_create_params.MessageCreateParamsNonStreaming,
-            ),
-            options=make_request_options(
-                extra_headers=extra_headers,
-                extra_query=extra_query,
-                extra_body=extra_body,
-                timeout=timeout,
-                post_parser=parser,
-            ),
-            cast_to=cast(Type[ParsedMessage[ResponseFormatT]], Message),
-            stream=False,
-        )
+        return MessageStreamManager(make_request)
 
     def count_tokens(
         self,
         *,
         messages: Iterable[MessageParam],
         model: ModelParam,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        output_format: None | JSONOutputFormatParam | type | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[MessageCountTokensToolParam] | Omit = omit,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[MessageCountTokensToolParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> MessageTokensCount:
         """
         Count the number of tokens in a Message.
@@ -1287,7 +1065,7 @@ class Messages(SyncAPIResource):
         including tools, images, and documents, without creating it.
 
         Learn more about token counting in our
-        [user guide](https://docs.claude.com/en/docs/build-with-claude/token-counting)
+        [user guide](/en/docs/build-with-claude/token-counting)
 
         Args:
           messages: Input messages.
@@ -1347,30 +1125,45 @@ class Messages(SyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
               details and options.
 
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-
           system: System prompt.
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           thinking: Configuration for enabling Claude's extended thinking.
 
@@ -1379,7 +1172,7 @@ class Messages(SyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -1391,12 +1184,6 @@ class Messages(SyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -1459,7 +1246,7 @@ class Messages(SyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           extra_headers: Send extra headers
 
@@ -1469,45 +1256,12 @@ class Messages(SyncAPIResource):
 
           timeout: Override the client-level default timeout for this request, in seconds
         """
-        # Transform output_format if provided
-        transformed_output_format: Optional[JSONOutputFormatParam] | NotGiven = NOT_GIVEN
-
-        if is_dict(output_format):
-            transformed_output_format = cast(JSONOutputFormatParam, output_format)
-        elif is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[type] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = JSONOutputFormatParam(schema=transform_schema(schema), type="json_schema")
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-        # Merge output_format into output_config
-        merged_output_config: OutputConfigParam | Omit = omit
-        if is_given(transformed_output_format):
-            if is_given(output_config):
-                merged_output_config = {**output_config, "format": transformed_output_format}
-            else:
-                merged_output_config = {"format": transformed_output_format}
-        elif is_given(output_config):
-            merged_output_config = output_config
-
         return self._post(
             "/v1/messages/count_tokens",
             body=maybe_transform(
                 {
                     "messages": messages,
                     "model": model,
-                    "messages": messages,
-                    "model": model,
-                    "cache_control": cache_control,
-                    "output_config": merged_output_config,
                     "system": system,
                     "thinking": thinking,
                     "tool_choice": tool_choice,
@@ -1553,27 +1307,22 @@ class AsyncMessages(AsyncAPIResource):
         max_tokens: int,
         messages: Iterable[MessageParam],
         model: ModelParam,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Message:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -1582,8 +1331,7 @@ class AsyncMessages(AsyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -1592,7 +1340,7 @@ class AsyncMessages(AsyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -1651,36 +1399,41 @@ class AsyncMessages(AsyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
               details and options.
 
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
-
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -1694,13 +1447,14 @@ class AsyncMessages(AsyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           system: System prompt.
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -1718,7 +1472,7 @@ class AsyncMessages(AsyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -1730,12 +1484,6 @@ class AsyncMessages(AsyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -1798,7 +1546,7 @@ class AsyncMessages(AsyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -1836,26 +1584,21 @@ class AsyncMessages(AsyncAPIResource):
         messages: Iterable[MessageParam],
         model: ModelParam,
         stream: Literal[True],
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> AsyncStream[RawMessageStreamEvent]:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -1864,8 +1607,7 @@ class AsyncMessages(AsyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -1874,7 +1616,7 @@ class AsyncMessages(AsyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -1933,14 +1675,35 @@ class AsyncMessages(AsyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
@@ -1948,25 +1711,10 @@ class AsyncMessages(AsyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
-
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -1982,7 +1730,7 @@ class AsyncMessages(AsyncAPIResource):
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -2000,7 +1748,7 @@ class AsyncMessages(AsyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -2012,12 +1760,6 @@ class AsyncMessages(AsyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -2080,7 +1822,7 @@ class AsyncMessages(AsyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -2118,26 +1860,21 @@ class AsyncMessages(AsyncAPIResource):
         messages: Iterable[MessageParam],
         model: ModelParam,
         stream: bool,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Message | AsyncStream[RawMessageStreamEvent]:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -2146,8 +1883,7 @@ class AsyncMessages(AsyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -2156,7 +1892,7 @@ class AsyncMessages(AsyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -2215,14 +1951,35 @@ class AsyncMessages(AsyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
@@ -2230,25 +1987,10 @@ class AsyncMessages(AsyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
-
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -2264,7 +2006,7 @@ class AsyncMessages(AsyncAPIResource):
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -2282,7 +2024,7 @@ class AsyncMessages(AsyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -2294,12 +2036,6 @@ class AsyncMessages(AsyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -2362,7 +2098,7 @@ class AsyncMessages(AsyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -2399,44 +2135,30 @@ class AsyncMessages(AsyncAPIResource):
         max_tokens: int,
         messages: Iterable[MessageParam],
         model: ModelParam,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | Literal[True] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Message | AsyncStream[RawMessageStreamEvent]:
         if not stream and not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
-            timeout = self._client._calculate_nonstreaming_timeout(
-                max_tokens, MODEL_NONSTREAMING_TOKENS.get(model, None)
-            )
+            timeout = self._client._calculate_nonstreaming_timeout(max_tokens)
 
         if model in DEPRECATED_MODELS:
             warnings.warn(
                 f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
                 DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
                 stacklevel=3,
             )
 
@@ -2447,12 +2169,7 @@ class AsyncMessages(AsyncAPIResource):
                     "max_tokens": max_tokens,
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
-                    "container": container,
-                    "inference_geo": inference_geo,
                     "metadata": metadata,
-                    "output_config": output_config,
-                    "service_tier": service_tier,
                     "stop_sequences": stop_sequences,
                     "stream": stream,
                     "system": system,
@@ -2463,9 +2180,7 @@ class AsyncMessages(AsyncAPIResource):
                     "top_k": top_k,
                     "top_p": top_p,
                 },
-                message_create_params.MessageCreateParamsStreaming
-                if stream
-                else message_create_params.MessageCreateParamsNonStreaming,
+                message_create_params.MessageCreateParams,
             ),
             options=make_request_options(
                 extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
@@ -2481,28 +2196,22 @@ class AsyncMessages(AsyncAPIResource):
         max_tokens: int,
         messages: Iterable[MessageParam],
         model: ModelParam,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        output_format: None | JSONOutputFormatParam | type[ResponseFormatT] | Omit = omit,
-        container: Optional[str] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[ToolUnionParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> AsyncMessageStreamManager[ResponseFormatT]:
+    ) -> AsyncMessageStreamManager:
         """Create a Message stream"""
         if model in DEPRECATED_MODELS:
             warnings.warn(
@@ -2511,47 +2220,10 @@ class AsyncMessages(AsyncAPIResource):
                 stacklevel=3,
             )
 
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
         extra_headers = {
-            "X-Stainless-Helper-Method": "stream",
             "X-Stainless-Stream-Helper": "messages",
             **(extra_headers or {}),
         }
-
-        transformed_output_format: Optional[JSONOutputFormatParam] | NotGiven = NOT_GIVEN
-
-        if is_dict(output_format):
-            transformed_output_format = cast(JSONOutputFormatParam, output_format)
-        elif is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[ResponseFormatT] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = JSONOutputFormatParam(schema=transform_schema(schema), type="json_schema")
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-        # Merge output_format into output_config
-        merged_output_config: OutputConfigParam | Omit = omit
-        if is_given(transformed_output_format):
-            if is_given(output_config):
-                merged_output_config = {**output_config, "format": transformed_output_format}
-            else:
-                merged_output_config = {"format": transformed_output_format}
-        elif is_given(output_config):
-            merged_output_config = output_config
-
         request = self._post(
             "/v1/messages",
             body=maybe_transform(
@@ -2559,12 +2231,7 @@ class AsyncMessages(AsyncAPIResource):
                     "max_tokens": max_tokens,
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
-                    "inference_geo": inference_geo,
                     "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "container": container,
-                    "service_tier": service_tier,
                     "stop_sequences": stop_sequences,
                     "system": system,
                     "temperature": temperature,
@@ -2584,147 +2251,23 @@ class AsyncMessages(AsyncAPIResource):
             stream=True,
             stream_cls=AsyncStream[RawMessageStreamEvent],
         )
-        return AsyncMessageStreamManager(
-            request,
-            output_format=NOT_GIVEN if is_dict(output_format) else cast(ResponseFormatT, output_format),
-        )
-
-    async def parse(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[MessageParam],
-        model: ModelParam,
-        metadata: MetadataParam | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[ToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> ParsedMessage[ResponseFormatT]:
-        if not stream and not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
-            timeout = self._client._calculate_nonstreaming_timeout(
-                max_tokens, MODEL_NONSTREAMING_TOKENS.get(model, None)
-            )
-
-        if model in DEPRECATED_MODELS:
-            warnings.warn(
-                f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
-        extra_headers = {
-            "X-Stainless-Helper": "messages.parse",
-            **(extra_headers or {}),
-        }
-
-        transformed_output_format: Optional[JSONOutputFormatParam] | NotGiven = NOT_GIVEN
-
-        if is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[ResponseFormatT] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = JSONOutputFormatParam(schema=transform_schema(schema), type="json_schema")
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-        def parser(response: Message) -> ParsedMessage[ResponseFormatT]:
-            return parse_response(
-                response=response,
-                output_format=cast(
-                    ResponseFormatT,
-                    output_format if is_given(output_format) and output_format is not None else NOT_GIVEN,
-                ),
-            )
-
-        # Merge output_format into output_config
-        merged_output_config: OutputConfigParam | Omit = omit
-        if is_given(transformed_output_format):
-            if is_given(output_config):
-                merged_output_config = {**output_config, "format": transformed_output_format}
-            else:
-                merged_output_config = {"format": transformed_output_format}
-        elif is_given(output_config):
-            merged_output_config = output_config
-
-        return await self._post(
-            "/v1/messages",
-            body=await async_maybe_transform(
-                {
-                    "max_tokens": max_tokens,
-                    "messages": messages,
-                    "model": model,
-                    "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "service_tier": service_tier,
-                    "stop_sequences": stop_sequences,
-                    "stream": stream,
-                    "system": system,
-                    "temperature": temperature,
-                    "thinking": thinking,
-                    "tool_choice": tool_choice,
-                    "tools": tools,
-                    "top_k": top_k,
-                    "top_p": top_p,
-                },
-                message_create_params.MessageCreateParamsNonStreaming,
-            ),
-            options=make_request_options(
-                extra_headers=extra_headers,
-                extra_query=extra_query,
-                extra_body=extra_body,
-                timeout=timeout,
-                post_parser=parser,
-            ),
-            cast_to=cast(Type[ParsedMessage[ResponseFormatT]], Message),
-            stream=False,
-        )
+        return AsyncMessageStreamManager(request)
 
     async def count_tokens(
         self,
         *,
         messages: Iterable[MessageParam],
         model: ModelParam,
-        cache_control: Optional[CacheControlEphemeralParam] | Omit = omit,
-        output_config: OutputConfigParam | Omit = omit,
-        output_format: None | JSONOutputFormatParam | type | Omit = omit,
-        system: Union[str, Iterable[TextBlockParam]] | Omit = omit,
-        thinking: ThinkingConfigParam | Omit = omit,
-        tool_choice: ToolChoiceParam | Omit = omit,
-        tools: Iterable[MessageCountTokensToolParam] | Omit = omit,
+        system: Union[str, Iterable[TextBlockParam]] | NotGiven = NOT_GIVEN,
+        thinking: ThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: ToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[MessageCountTokensToolParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> MessageTokensCount:
         """
         Count the number of tokens in a Message.
@@ -2733,7 +2276,7 @@ class AsyncMessages(AsyncAPIResource):
         including tools, images, and documents, without creating it.
 
         Learn more about token counting in our
-        [user guide](https://docs.claude.com/en/docs/build-with-claude/token-counting)
+        [user guide](/en/docs/build-with-claude/token-counting)
 
         Args:
           messages: Input messages.
@@ -2793,30 +2336,45 @@ class AsyncMessages(AsyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
               details and options.
 
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-
           system: System prompt.
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           thinking: Configuration for enabling Claude's extended thinking.
 
@@ -2825,7 +2383,7 @@ class AsyncMessages(AsyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -2837,12 +2395,6 @@ class AsyncMessages(AsyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -2905,7 +2457,7 @@ class AsyncMessages(AsyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           extra_headers: Send extra headers
 
@@ -2915,45 +2467,12 @@ class AsyncMessages(AsyncAPIResource):
 
           timeout: Override the client-level default timeout for this request, in seconds
         """
-        # Transform output_format if provided
-        transformed_output_format: Optional[JSONOutputFormatParam] | NotGiven = NOT_GIVEN
-
-        if is_dict(output_format):
-            transformed_output_format = cast(JSONOutputFormatParam, output_format)
-        elif is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[type] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = JSONOutputFormatParam(schema=transform_schema(schema), type="json_schema")
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-        # Merge output_format into output_config
-        merged_output_config: OutputConfigParam | Omit = omit
-        if is_given(transformed_output_format):
-            if is_given(output_config):
-                merged_output_config = {**output_config, "format": transformed_output_format}
-            else:
-                merged_output_config = {"format": transformed_output_format}
-        elif is_given(output_config):
-            merged_output_config = output_config
-
         return await self._post(
             "/v1/messages/count_tokens",
             body=await async_maybe_transform(
                 {
                     "messages": messages,
                     "model": model,
-                    "messages": messages,
-                    "model": model,
-                    "cache_control": cache_control,
-                    "output_config": merged_output_config,
                     "system": system,
                     "thinking": thinking,
                     "tool_choice": tool_choice,

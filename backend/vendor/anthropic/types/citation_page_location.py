@@ -17,8 +17,6 @@ class CitationPageLocation(BaseModel):
 
     end_page_number: int
 
-    file_id: Optional[str] = None
-
     start_page_number: int
 
     type: Literal["page_location"]

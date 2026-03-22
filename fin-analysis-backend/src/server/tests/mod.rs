@@ -26,8 +26,8 @@ async fn post_analyze_get_price_returns_200() {
     });
     let resp = server.post("/analyze").json(&body).await;
     resp.assert_status_ok();
-    let json: serde_json::Value = resp.json();
-    assert!(json.get("current_xrp_price").is_some());
+    let text = resp.text();
+    assert!(text.contains("Current XRP Price"), "unexpected response body: {text}");
 }
 
 #[tokio::test]

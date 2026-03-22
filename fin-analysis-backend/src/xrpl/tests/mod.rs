@@ -23,6 +23,7 @@ pub struct MockXrplClient {
     pub xrp_price: f64,
     pub amm_response: Option<AmmInfoResponse>,
     pub account_lines: Vec<TrustLine>,
+    pub account_lines_error: Option<String>,
 }
 
 impl Default for MockXrplClient {
@@ -31,6 +32,7 @@ impl Default for MockXrplClient {
             xrp_price: 0.50,
             amm_response: Some(make_amm_response()),
             account_lines: vec![make_lp_line()],
+            account_lines_error: None,
         }
     }
 }
@@ -81,6 +83,10 @@ impl XrplClient for MockXrplClient {
     }
 
     async fn account_lines(&self, _account: &str) -> Result<AccountLinesResponse, AnalysisError> {
+        if let Some(error) = &self.account_lines_error {
+            return Err(AnalysisError::XrplRpc(error.clone()));
+        }
+
         Ok(AccountLinesResponse {
             lines: self.account_lines.clone(),
             marker: None,

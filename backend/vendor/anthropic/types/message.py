@@ -6,8 +6,6 @@ from typing_extensions import Literal
 from .model import Model
 from .usage import Usage
 from .._models import BaseModel
-from .container import Container
-from .stop_reason import StopReason
 from .content_block import ContentBlock, ContentBlock as ContentBlock
 
 __all__ = ["Message"]
@@ -18,12 +16,6 @@ class Message(BaseModel):
     """Unique object identifier.
 
     The format and length of IDs may change over time.
-    """
-
-    container: Optional[Container] = None
-    """
-    Information about the container used in the request (for the code execution
-    tool)
     """
 
     content: List[ContentBlock]
@@ -74,7 +66,7 @@ class Message(BaseModel):
     This will always be `"assistant"`.
     """
 
-    stop_reason: Optional[StopReason] = None
+    stop_reason: Optional[Literal["end_turn", "max_tokens", "stop_sequence", "tool_use"]] = None
     """The reason that we stopped.
 
     This may be one the following values:
@@ -83,10 +75,6 @@ class Message(BaseModel):
     - `"max_tokens"`: we exceeded the requested `max_tokens` or the model's maximum
     - `"stop_sequence"`: one of your provided custom `stop_sequences` was generated
     - `"tool_use"`: the model invoked one or more tools
-    - `"pause_turn"`: we paused a long-running turn. You may provide the response
-      back as-is in a subsequent request to let the model continue.
-    - `"refusal"`: when streaming classifiers intervene to handle potential policy
-      violations
 
     In non-streaming mode this value is always non-null. In streaming mode, it is
     null in the `message_start` event and non-null otherwise.

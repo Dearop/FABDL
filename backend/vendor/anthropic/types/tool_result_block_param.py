@@ -7,16 +7,11 @@ from typing_extensions import Literal, Required, TypeAlias, TypedDict
 
 from .text_block_param import TextBlockParam
 from .image_block_param import ImageBlockParam
-from .document_block_param import DocumentBlockParam
-from .search_result_block_param import SearchResultBlockParam
-from .tool_reference_block_param import ToolReferenceBlockParam
 from .cache_control_ephemeral_param import CacheControlEphemeralParam
 
 __all__ = ["ToolResultBlockParam", "Content"]
 
-Content: TypeAlias = Union[
-    TextBlockParam, ImageBlockParam, SearchResultBlockParam, DocumentBlockParam, ToolReferenceBlockParam
-]
+Content: TypeAlias = Union[TextBlockParam, ImageBlockParam]
 
 
 class ToolResultBlockParam(TypedDict, total=False):
@@ -25,7 +20,6 @@ class ToolResultBlockParam(TypedDict, total=False):
     type: Required[Literal["tool_result"]]
 
     cache_control: Optional[CacheControlEphemeralParam]
-    """Create a cache control breakpoint at this content block."""
 
     content: Union[str, Iterable[Content]]
 

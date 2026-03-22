@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import List, Union, Iterable, Optional
-from typing_extensions import Literal, Required, Annotated, TypeAlias, TypedDict
+from typing import List, Union, Iterable
+from typing_extensions import Required, Annotated, TypeAlias, TypedDict
 
 from ..._utils import PropertyInfo
 from ..model_param import ModelParam
@@ -11,34 +11,14 @@ from .beta_tool_param import BetaToolParam
 from .beta_message_param import BetaMessageParam
 from ..anthropic_beta_param import AnthropicBetaParam
 from .beta_text_block_param import BetaTextBlockParam
-from .beta_mcp_toolset_param import BetaMCPToolsetParam
 from .beta_tool_choice_param import BetaToolChoiceParam
-from .beta_output_config_param import BetaOutputConfigParam
 from .beta_thinking_config_param import BetaThinkingConfigParam
-from .beta_json_output_format_param import BetaJSONOutputFormatParam
 from .beta_tool_bash_20241022_param import BetaToolBash20241022Param
 from .beta_tool_bash_20250124_param import BetaToolBash20250124Param
-from .beta_memory_tool_20250818_param import BetaMemoryTool20250818Param
-from .beta_cache_control_ephemeral_param import BetaCacheControlEphemeralParam
-from .beta_web_fetch_tool_20250910_param import BetaWebFetchTool20250910Param
-from .beta_web_fetch_tool_20260209_param import BetaWebFetchTool20260209Param
-from .beta_web_fetch_tool_20260309_param import BetaWebFetchTool20260309Param
-from .beta_web_search_tool_20250305_param import BetaWebSearchTool20250305Param
-from .beta_web_search_tool_20260209_param import BetaWebSearchTool20260209Param
-from .beta_context_management_config_param import BetaContextManagementConfigParam
 from .beta_tool_text_editor_20241022_param import BetaToolTextEditor20241022Param
 from .beta_tool_text_editor_20250124_param import BetaToolTextEditor20250124Param
-from .beta_tool_text_editor_20250429_param import BetaToolTextEditor20250429Param
-from .beta_tool_text_editor_20250728_param import BetaToolTextEditor20250728Param
 from .beta_tool_computer_use_20241022_param import BetaToolComputerUse20241022Param
 from .beta_tool_computer_use_20250124_param import BetaToolComputerUse20250124Param
-from .beta_tool_computer_use_20251124_param import BetaToolComputerUse20251124Param
-from .beta_code_execution_tool_20250522_param import BetaCodeExecutionTool20250522Param
-from .beta_code_execution_tool_20250825_param import BetaCodeExecutionTool20250825Param
-from .beta_code_execution_tool_20260120_param import BetaCodeExecutionTool20260120Param
-from .beta_tool_search_tool_bm25_20251119_param import BetaToolSearchToolBm25_20251119Param
-from .beta_tool_search_tool_regex_20251119_param import BetaToolSearchToolRegex20251119Param
-from .beta_request_mcp_server_url_definition_param import BetaRequestMCPServerURLDefinitionParam
 
 __all__ = ["MessageCountTokensParams", "Tool"]
 
@@ -102,14 +82,35 @@ class MessageCountTokensParams(TypedDict, total=False):
     { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
     ```
 
-    See [input examples](https://docs.claude.com/en/api/messages-examples).
+    Starting with Claude 3 models, you can also send image content blocks:
+
+    ```json
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": "/9j/4AAQSkZJRg..."
+          }
+        },
+        { "type": "text", "text": "What is in this image?" }
+      ]
+    }
+    ```
+
+    We currently support the `base64` source type for images, and the `image/jpeg`,
+    `image/png`, `image/gif`, and `image/webp` media types.
+
+    See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+    more input examples.
 
     Note that if you want to include a
-    [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-    top-level `system` parameter — there is no `"system"` role for input messages in
-    the Messages API.
-
-    There is a limit of 100,000 messages in a single request.
+    [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+    the top-level `system` parameter — there is no `"system"` role for input
+    messages in the Messages API.
     """
 
     model: Required[ModelParam]
@@ -119,47 +120,12 @@ class MessageCountTokensParams(TypedDict, total=False):
     details and options.
     """
 
-    cache_control: Optional[BetaCacheControlEphemeralParam]
-    """
-    Top-level cache control automatically applies a cache_control marker to the last
-    cacheable block in the request.
-    """
-
-    context_management: Optional[BetaContextManagementConfigParam]
-    """Context management configuration.
-
-    This allows you to control how Claude manages context across multiple requests,
-    such as whether to clear function results or not.
-    """
-
-    mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam]
-    """MCP servers to be utilized in this request"""
-
-    output_config: BetaOutputConfigParam
-    """Configuration options for the model's output, such as the output format."""
-
-    output_format: Optional[BetaJSONOutputFormatParam]
-    """Deprecated: Use `output_config.format` instead.
-
-    See
-    [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-    A schema to specify Claude's output format in responses. This parameter will be
-    removed in a future release.
-    """
-
-    speed: Optional[Literal["standard", "fast"]]
-    """The inference speed mode for this request.
-
-    `"fast"` enables high output-tokens-per-second inference.
-    """
-
     system: Union[str, Iterable[BetaTextBlockParam]]
     """System prompt.
 
     A system prompt is a way of providing context and instructions to Claude, such
     as specifying a particular goal or role. See our
-    [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+    [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
     """
 
     thinking: BetaThinkingConfigParam
@@ -170,7 +136,7 @@ class MessageCountTokensParams(TypedDict, total=False):
     tokens and counts towards your `max_tokens` limit.
 
     See
-    [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+    [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
     for details.
     """
 
@@ -188,12 +154,6 @@ class MessageCountTokensParams(TypedDict, total=False):
     content blocks that represent the model's use of those tools. You can then run
     those tools using the tool input generated by the model and then optionally
     return results back to the model using `tool_result` content blocks.
-
-    There are two types of tools: **client tools** and **server tools**. The
-    behavior described below applies to client tools. For
-    [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-    see their individual documentation as each has its own behavior (e.g., the
-    [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
     Each tool definition includes:
 
@@ -256,7 +216,7 @@ class MessageCountTokensParams(TypedDict, total=False):
     functions, or more generally whenever you want the model to produce a particular
     JSON structure of output.
 
-    See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+    See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
     """
 
     betas: Annotated[List[AnthropicBetaParam], PropertyInfo(alias="anthropic-beta")]
@@ -265,25 +225,10 @@ class MessageCountTokensParams(TypedDict, total=False):
 
 Tool: TypeAlias = Union[
     BetaToolParam,
-    BetaToolBash20241022Param,
-    BetaToolBash20250124Param,
-    BetaCodeExecutionTool20250522Param,
-    BetaCodeExecutionTool20250825Param,
-    BetaCodeExecutionTool20260120Param,
     BetaToolComputerUse20241022Param,
-    BetaMemoryTool20250818Param,
-    BetaToolComputerUse20250124Param,
+    BetaToolBash20241022Param,
     BetaToolTextEditor20241022Param,
-    BetaToolComputerUse20251124Param,
+    BetaToolComputerUse20250124Param,
+    BetaToolBash20250124Param,
     BetaToolTextEditor20250124Param,
-    BetaToolTextEditor20250429Param,
-    BetaToolTextEditor20250728Param,
-    BetaWebSearchTool20250305Param,
-    BetaWebFetchTool20250910Param,
-    BetaWebSearchTool20260209Param,
-    BetaWebFetchTool20260209Param,
-    BetaWebFetchTool20260309Param,
-    BetaToolSearchToolBm25_20251119Param,
-    BetaToolSearchToolRegex20251119Param,
-    BetaMCPToolsetParam,
 ]

@@ -29,7 +29,11 @@ pub struct HttpXrplClient {
 impl HttpXrplClient {
     pub fn new(endpoint: impl Into<String>) -> Self {
         Self {
-            http: Client::new(),
+            http: Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .user_agent("fin-analysis-backend/0.1")
+                .build()
+                .expect("HTTP client should build"),
             endpoint: endpoint.into(),
             price_feed_url: None,
         }

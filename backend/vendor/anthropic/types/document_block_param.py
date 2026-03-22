@@ -23,9 +23,8 @@ class DocumentBlockParam(TypedDict, total=False):
     type: Required[Literal["document"]]
 
     cache_control: Optional[CacheControlEphemeralParam]
-    """Create a cache control breakpoint at this content block."""
 
-    citations: Optional[CitationsConfigParam]
+    citations: CitationsConfigParam
 
     context: Optional[str]
 

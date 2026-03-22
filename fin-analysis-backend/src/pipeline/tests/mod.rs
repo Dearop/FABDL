@@ -69,3 +69,38 @@ async fn check_position_happy_path() {
     // filtering logic; we only assert no crash / no unexpected error.
     assert!(result.is_ok(), "check_position happy path should succeed: {:?}", result);
 }
+
+#[tokio::test]
+async fn analyze_risk_account_not_found_returns_empty_summary_with_warning() {
+    let pipeline = DefaultPipeline::new(MockXrplClient {
+        account_lines_error: Some("Account not found.".to_string()),
+        ..Default::default()
+    });
+    let intent = make_intent(IntentAction::AnalyzeRisk, Some("rMissingWallet"), None);
+
+    let summary = pipeline.run(intent).await.unwrap();
+
+    assert!(summary.positions.is_empty(), "expected empty positions");
+    assert_eq!(summary.total_value_usd, 0.0);
+    assert_eq!(summary.analysis_warnings.len(), 1);
+    assert!(
+        summary.analysis_warnings[0].contains("current XRPL network"),
+        "unexpected warning: {:?}",
+        summary.analysis_warnings
+    );
+}
+
+#[tokio::test]
+async fn analyze_risk_non_account_rpc_error_propagates() {
+    let pipeline = DefaultPipeline::new(MockXrplClient {
+        account_lines_error: Some("internalError: upstream timeout".to_string()),
+        ..Default::default()
+    });
+    let intent = make_intent(IntentAction::AnalyzeRisk, Some("rWallet"), None);
+
+    let err = pipeline.run(intent).await.unwrap_err().to_string();
+    assert!(
+        err.contains("internalError: upstream timeout"),
+        "expected original XRPL RPC error, got: {err}"
+    );
+}

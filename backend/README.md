@@ -45,6 +45,24 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 INFO:     Application startup complete
 ```
 
+### 4. Start the Rust analysis backend on lending devnet
+
+The API expects the Rust backend on `localhost:3001`. The backend now defaults to
+XRPL lending devnet (`https://lend.devnet.rippletest.net:51234`) so it matches the
+manual demo flow.
+
+```bash
+# Terminal 3: Start Rust backend with the lending-devnet default
+cd ../fin-analysis-backend
+cargo run
+```
+
+If you need to point Rust at a different network, override it explicitly:
+
+```bash
+XRPL_ENDPOINT=https://s.altnet.rippletest.net:51234 cargo run
+```
+
 ## API Endpoints
 
 ### Wallet

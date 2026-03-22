@@ -122,6 +122,8 @@ pub struct PortfolioRiskSummary {
     pub gamma_usd: f64,
     /// Net carry: fee_apr - weighted_borrow_apy - |IL_pct|/100.
     pub net_carry: f64,
+    /// Non-fatal analysis warnings to surface to operators and the LLM prompt.
+    pub analysis_warnings: Vec<String>,
 }
 
 impl PortfolioRiskSummary {
@@ -157,6 +159,13 @@ impl PortfolioRiskSummary {
             be_lower = self.break_even_lower,
             be_upper = self.break_even_upper,
         );
+
+        if !self.analysis_warnings.is_empty() {
+            prompt.push_str("\nWarnings:\n");
+            for warning in &self.analysis_warnings {
+                prompt.push_str(&format!("- {warning}\n"));
+            }
+        }
 
         let n = self.positions.len();
         if n > 0 {
@@ -219,6 +228,11 @@ impl PortfolioRiskSummary {
 
     /// Construct an empty summary (used as a fallback / placeholder).
     pub fn empty(xrp_price: f64) -> Self {
+        Self::empty_with_warnings(xrp_price, Vec::new())
+    }
+
+    /// Construct an empty summary with explicit non-fatal warnings.
+    pub fn empty_with_warnings(xrp_price: f64, analysis_warnings: Vec<String>) -> Self {
         Self {
             total_value_usd: 0.0,
             impermanent_loss_pct: 0.0,
@@ -238,6 +252,7 @@ impl PortfolioRiskSummary {
             cvar_95_usd: 0.0,
             gamma_usd: 0.0,
             net_carry: 0.0,
+            analysis_warnings,
         }
     }
 }

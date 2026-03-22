@@ -229,6 +229,7 @@ impl QuantModel for DefaultQuantModel {
             cvar_95_usd,
             gamma_usd,
             net_carry,
+            analysis_warnings: Vec::new(),
         })
     }
 }

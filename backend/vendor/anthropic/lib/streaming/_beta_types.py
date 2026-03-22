@@ -1,10 +1,10 @@
-from typing import TYPE_CHECKING, Any, Dict, Union, Generic, cast
+from typing import Union
 from typing_extensions import List, Literal, Annotated
 
-import jiter
-
-from ..._models import BaseModel, GenericModel
+from ..._models import BaseModel
 from ...types.beta import (
+    BetaMessage,
+    BetaContentBlock,
     BetaRawMessageStopEvent,
     BetaRawMessageDeltaEvent,
     BetaRawMessageStartEvent,
@@ -12,13 +12,11 @@ from ...types.beta import (
     BetaRawContentBlockDeltaEvent,
     BetaRawContentBlockStartEvent,
 )
-from .._parse._response import ResponseFormatT
 from ..._utils._transform import PropertyInfo
-from ...types.beta.parsed_beta_message import ParsedBetaMessage, ParsedBetaContentBlock
 from ...types.beta.beta_citations_delta import Citation
 
 
-class ParsedBetaTextEvent(BaseModel):
+class BetaTextEvent(BaseModel):
     type: Literal["text"]
 
     text: str
@@ -26,9 +24,6 @@ class ParsedBetaTextEvent(BaseModel):
 
     snapshot: str
     """The entire accumulated text"""
-
-    def parsed_snapshot(self) -> Dict[str, Any]:
-        return cast(Dict[str, Any], jiter.from_json(self.snapshot.encode("utf-8"), partial_mode="trailing-strings"))
 
 
 class BetaCitationEvent(BaseModel):
@@ -75,42 +70,31 @@ class BetaInputJsonEvent(BaseModel):
     """
 
 
-class BetaCompactionEvent(BaseModel):
-    type: Literal["compaction"]
-
-    content: Union[str, None]
-    """The compaction content"""
-
-
-class ParsedBetaMessageStopEvent(BetaRawMessageStopEvent, GenericModel, Generic[ResponseFormatT]):
+class BetaMessageStopEvent(BetaRawMessageStopEvent):
     type: Literal["message_stop"]
 
-    message: ParsedBetaMessage[ResponseFormatT]
+    message: BetaMessage
 
 
-class ParsedBetaContentBlockStopEvent(BetaRawContentBlockStopEvent, GenericModel, Generic[ResponseFormatT]):
+class BetaContentBlockStopEvent(BetaRawContentBlockStopEvent):
     type: Literal["content_block_stop"]
 
-    if TYPE_CHECKING:
-        content_block: ParsedBetaContentBlock[ResponseFormatT]
-    else:
-        content_block: ParsedBetaContentBlock
+    content_block: BetaContentBlock
 
 
-ParsedBetaMessageStreamEvent = Annotated[
+BetaMessageStreamEvent = Annotated[
     Union[
-        ParsedBetaTextEvent,
+        BetaTextEvent,
         BetaCitationEvent,
         BetaThinkingEvent,
         BetaSignatureEvent,
         BetaInputJsonEvent,
-        BetaCompactionEvent,
         BetaRawMessageStartEvent,
         BetaRawMessageDeltaEvent,
-        ParsedBetaMessageStopEvent[ResponseFormatT],
+        BetaMessageStopEvent,
         BetaRawContentBlockStartEvent,
         BetaRawContentBlockDeltaEvent,
-        ParsedBetaContentBlockStopEvent[ResponseFormatT],
+        BetaContentBlockStopEvent,
     ],
     PropertyInfo(discriminator="type"),
 ]

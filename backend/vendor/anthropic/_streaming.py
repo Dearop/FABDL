@@ -6,7 +6,7 @@ import json
 import inspect
 import warnings
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Generic, TypeVar, Iterator, Optional, AsyncIterator, cast
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, Iterator, AsyncIterator, cast
 from typing_extensions import Self, Protocol, TypeGuard, override, get_origin, runtime_checkable
 
 import httpx
@@ -15,7 +15,6 @@ from ._utils import is_dict, extract_type_var_from_base
 
 if TYPE_CHECKING:
     from ._client import Anthropic, AsyncAnthropic
-    from ._models import FinalRequestOptions
 
 
 _T = TypeVar("_T")
@@ -46,7 +45,7 @@ class Stream(Generic[_T], metaclass=_SyncStreamMeta):
     """Provides the core interface to iterate over a synchronous stream response."""
 
     response: httpx.Response
-    _options: Optional[FinalRequestOptions] = None
+
     _decoder: SSEBytesDecoder
 
     def __init__(
@@ -55,12 +54,10 @@ class Stream(Generic[_T], metaclass=_SyncStreamMeta):
         cast_to: type[_T],
         response: httpx.Response,
         client: Anthropic,
-        options: Optional[FinalRequestOptions] = None,
     ) -> None:
         self.response = response
         self._cast_to = cast_to
         self._client = client
-        self._options = options
         self._decoder = client._make_sse_decoder()
         self._iterator = self.__stream__()
 
@@ -80,45 +77,45 @@ class Stream(Generic[_T], metaclass=_SyncStreamMeta):
         process_data = self._client._process_response_data
         iterator = self._iter_events()
 
-        try:
-            for sse in iterator:
-                if sse.event == "completion":
-                    yield process_data(data=sse.json(), cast_to=cast_to, response=response)
+        for sse in iterator:
+            if sse.event == "completion":
+                yield process_data(data=sse.json(), cast_to=cast_to, response=response)
 
-                if (
-                    sse.event == "message_start"
-                    or sse.event == "message_delta"
-                    or sse.event == "message_stop"
-                    or sse.event == "content_block_start"
-                    or sse.event == "content_block_delta"
-                    or sse.event == "content_block_stop"
-                ):
-                    data = sse.json()
-                    if is_dict(data) and "type" not in data:
-                        data["type"] = sse.event
+            if (
+                sse.event == "message_start"
+                or sse.event == "message_delta"
+                or sse.event == "message_stop"
+                or sse.event == "content_block_start"
+                or sse.event == "content_block_delta"
+                or sse.event == "content_block_stop"
+            ):
+                data = sse.json()
+                if is_dict(data) and "type" not in data:
+                    data["type"] = sse.event
 
-                    yield process_data(data=data, cast_to=cast_to, response=response)
+                yield process_data(data=data, cast_to=cast_to, response=response)
 
-                if sse.event == "ping":
-                    continue
+            if sse.event == "ping":
+                continue
 
-                if sse.event == "error":
-                    body = sse.data
+            if sse.event == "error":
+                body = sse.data
 
-                    try:
-                        body = sse.json()
-                        err_msg = f"{body}"
-                    except Exception:
-                        err_msg = sse.data or f"Error code: {response.status_code}"
+                try:
+                    body = sse.json()
+                    err_msg = f"{body}"
+                except Exception:
+                    err_msg = sse.data or f"Error code: {response.status_code}"
 
-                    raise self._client._make_status_error(
-                        err_msg,
-                        body=body,
-                        response=self.response,
-                    )
-        finally:
-            # Ensure the response is closed even if the consumer doesn't read all data
-            response.close()
+                raise self._client._make_status_error(
+                    err_msg,
+                    body=body,
+                    response=self.response,
+                )
+
+        # Ensure the entire stream is consumed
+        for _sse in iterator:
+            ...
 
     def __enter__(self) -> Self:
         return self
@@ -165,7 +162,7 @@ class AsyncStream(Generic[_T], metaclass=_AsyncStreamMeta):
     """Provides the core interface to iterate over an asynchronous stream response."""
 
     response: httpx.Response
-    _options: Optional[FinalRequestOptions] = None
+
     _decoder: SSEDecoder | SSEBytesDecoder
 
     def __init__(
@@ -174,12 +171,10 @@ class AsyncStream(Generic[_T], metaclass=_AsyncStreamMeta):
         cast_to: type[_T],
         response: httpx.Response,
         client: AsyncAnthropic,
-        options: Optional[FinalRequestOptions] = None,
     ) -> None:
         self.response = response
         self._cast_to = cast_to
         self._client = client
-        self._options = options
         self._decoder = client._make_sse_decoder()
         self._iterator = self.__stream__()
 
@@ -200,45 +195,45 @@ class AsyncStream(Generic[_T], metaclass=_AsyncStreamMeta):
         process_data = self._client._process_response_data
         iterator = self._iter_events()
 
-        try:
-            async for sse in iterator:
-                if sse.event == "completion":
-                    yield process_data(data=sse.json(), cast_to=cast_to, response=response)
+        async for sse in iterator:
+            if sse.event == "completion":
+                yield process_data(data=sse.json(), cast_to=cast_to, response=response)
 
-                if (
-                    sse.event == "message_start"
-                    or sse.event == "message_delta"
-                    or sse.event == "message_stop"
-                    or sse.event == "content_block_start"
-                    or sse.event == "content_block_delta"
-                    or sse.event == "content_block_stop"
-                ):
-                    data = sse.json()
-                    if is_dict(data) and "type" not in data:
-                        data["type"] = sse.event
+            if (
+                sse.event == "message_start"
+                or sse.event == "message_delta"
+                or sse.event == "message_stop"
+                or sse.event == "content_block_start"
+                or sse.event == "content_block_delta"
+                or sse.event == "content_block_stop"
+            ):
+                data = sse.json()
+                if is_dict(data) and "type" not in data:
+                    data["type"] = sse.event
 
-                    yield process_data(data=data, cast_to=cast_to, response=response)
+                yield process_data(data=data, cast_to=cast_to, response=response)
 
-                if sse.event == "ping":
-                    continue
+            if sse.event == "ping":
+                continue
 
-                if sse.event == "error":
-                    body = sse.data
+            if sse.event == "error":
+                body = sse.data
 
-                    try:
-                        body = sse.json()
-                        err_msg = f"{body}"
-                    except Exception:
-                        err_msg = sse.data or f"Error code: {response.status_code}"
+                try:
+                    body = sse.json()
+                    err_msg = f"{body}"
+                except Exception:
+                    err_msg = sse.data or f"Error code: {response.status_code}"
 
-                    raise self._client._make_status_error(
-                        err_msg,
-                        body=body,
-                        response=self.response,
-                    )
-        finally:
-            # Ensure the response is closed even if the consumer doesn't read all data
-            await response.aclose()
+                raise self._client._make_status_error(
+                    err_msg,
+                    body=body,
+                    response=self.response,
+                )
+
+        # Ensure the entire stream is consumed
+        async for _sse in iterator:
+            ...
 
     async def __aenter__(self) -> Self:
         return self
