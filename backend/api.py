@@ -13,7 +13,7 @@ from typing import Optional
 # Vendor directory (packages installed here when system pip Scripts dir is locked)
 _VENDOR = os.path.join(os.path.dirname(__file__), 'vendor')
 if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
-    sys.path.insert(0, _VENDOR)
+    sys.path.append(_VENDOR)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware

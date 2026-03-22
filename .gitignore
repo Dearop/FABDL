@@ -6,6 +6,9 @@ frontend/dist/
 frontend/.env.local
 frontend/.env.*.local
 
+# Vendored packages (contain compiled C extensions — machine/OS/Python-version specific)
+backend/vendor/
+
 # Python (all locations)
 **/__pycache__/
 **/*.pyc
