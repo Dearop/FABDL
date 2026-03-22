@@ -1,4 +1,4 @@
-# VEGA — XRPL AI Trading Assistant
+# XRPL in Time — XRPL AI Trading Assistant
 
 A conversational AI system that analyzes XRPL AMM portfolio risk, generates quantitative trading strategies with visual risk profiles, and executes them on-chain.
 
@@ -47,43 +47,44 @@ AI tooling is exposed via `mcp-server` (MCP stdio transport).
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) 18+
-- Python 3.10+
-- [Rust](https://rustup.rs/) + Cargo
-- [Ollama](https://ollama.ai/) (for local LLM)
-- An `ANTHROPIC_API_KEY` (for strategy generation)
+| Tool | Version | Install |
+|---|---|---|
+| Node.js | 18+ | https://nodejs.org |
+| Python | 3.10+ | https://python.org |
+| Rust / Cargo | stable | https://rustup.rs |
+| Ollama | any | https://ollama.ai |
 
-### 1. Install dependencies
+### Environment variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | **Yes** | Claude API key for strategy generation |
+
+### First-time setup
 
 ```bash
-make install
+make dev
 ```
 
-This installs frontend npm packages, backend Python deps, and builds the Rust analysis backend.
+This single command checks that all prerequisites are installed, installs every package dependency (npm, pip, cargo), and pulls the Llama 3.2 3B model into Ollama. It then prints the next steps.
 
-### 2. Set your API key
+### Starting the services
 
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
+Open 5 terminal tabs and run one command in each:
 
-### 3. Start all services (5 terminals)
-
-| Terminal | Command | Port | Expected output |
+| Tab | Command | Port | Ready when you see |
 |---|---|---|---|
-| 1 — Ollama | `make start-ollama` | 11434 | `Listening on 127.0.0.1:11434` |
-| 2 — Intent Router | `make start-intent` | 50051 | `Intent Router listening on [::]:50051` |
-| 3 — Rust Analysis | `make start-rust` | 3001 | `listening on 0.0.0.0:3001` |
-| 4 — Backend API | `make start-backend` | 8000 | `Uvicorn running on http://0.0.0.0:8000` |
-| 5 — Frontend | `make start-frontend` | 3000 | `Ready in XXXms` |
+| 1 | `make start-ollama` | 11434 | `Listening on 127.0.0.1:11434` |
+| 2 | `make start-intent` | 50051 | `Intent Router listening on [::]:50051` |
+| 3 | `make start-rust` | 3001 | `listening on 0.0.0.0:3001` |
+| 4 | `make start-backend` | 8000 | `Uvicorn running on http://0.0.0.0:8000` |
+| 5 | `make start-frontend` | 3000 | `✓ Ready in XXXms` |
 
-Or just run `make setup` to print these instructions.
+Then open **http://localhost:3000**.
 
-### 4. Open the app
+Run `make logs` to see the expected full output for each service.
 
-Visit **http://localhost:3000** and connect your Xaman or Crossmark wallet.
-
-### 5. Example queries
+### Example queries
 
 ```
 "Analyze my portfolio risk"
