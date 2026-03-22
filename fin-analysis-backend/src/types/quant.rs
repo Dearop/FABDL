@@ -32,6 +32,8 @@ pub struct PositionRisk {
     pub var_95_usd: f64,
     /// This position's share of the pool's total LP supply (0–1).
     pub lp_share_pct: f64,
+    /// Second-order price sensitivity (gamma) in USD for constant-product AMM.
+    pub gamma_usd: f64,
 }
 
 // ---------------------------------------------------------------------------
@@ -44,6 +46,8 @@ pub struct LendingVaultSnapshot {
     pub total_supply_usd: f64,
     pub total_borrow_usd: f64,
     pub utilization_rate: f64,
+    pub kink_utilization: f64,
+    pub available_liquidity_usd: f64,
     pub supply_apy: f64,
     pub borrow_apy: f64,
 }
@@ -55,6 +59,8 @@ impl Default for LendingVaultSnapshot {
             total_supply_usd: 0.0,
             total_borrow_usd: 0.0,
             utilization_rate: 0.0,
+            kink_utilization: 0.0,
+            available_liquidity_usd: 0.0,
             supply_apy: 0.0,
             borrow_apy: 0.0,
         }
@@ -68,6 +74,8 @@ pub struct LoanPosition {
     pub collateral_asset: String,
     pub collateral_usd: f64,
     pub health_factor: f64,
+    pub liquidation_price: f64,
+    pub liquidation_penalty_pct: f64,
     pub borrow_apy: f64,
     pub term_days: Option<u32>,
 }
@@ -108,6 +116,12 @@ pub struct PortfolioRiskSummary {
     pub lending_vaults: Vec<LendingVaultSnapshot>,
     /// XLS-66d open loan positions for the user's wallet.
     pub open_loans: Vec<LoanPosition>,
+    /// 95 % 1-day Conditional VaR (expected shortfall) in USD.
+    pub cvar_95_usd: f64,
+    /// Portfolio-level gamma (second-order price sensitivity) in USD.
+    pub gamma_usd: f64,
+    /// Net carry: fee_apr - weighted_borrow_apy - |IL_pct|/100.
+    pub net_carry: f64,
 }
 
 impl PortfolioRiskSummary {
@@ -123,6 +137,9 @@ impl PortfolioRiskSummary {
              - Fee APR: {fee_apr:.1}%\n\
              - Sharpe Ratio: {sharpe:.2}\n\
              - VaR (95%, 1-day): ${var95:.0}\n\
+             - CVaR (95%, 1-day expected shortfall): ${cvar95:.0}\n\
+             - Gamma: ${gamma:.2}\n\
+             - Net Carry: {net_carry:.2}%\n\
              - Break-even Range: ${be_lower:.4} - ${be_upper:.4}\n",
             total_value = self.total_value_usd,
             il_pct = self.impermanent_loss_pct,
@@ -134,6 +151,9 @@ impl PortfolioRiskSummary {
             fee_apr = self.fee_apr * 100.0,
             sharpe = self.sharpe_ratio,
             var95 = self.var_95_usd,
+            cvar95 = self.cvar_95_usd,
+            gamma = self.gamma_usd,
+            net_carry = self.net_carry * 100.0,
             be_lower = self.break_even_lower,
             be_upper = self.break_even_upper,
         );
@@ -215,6 +235,9 @@ impl PortfolioRiskSummary {
             positions: Vec::new(),
             lending_vaults: Vec::new(),
             open_loans: Vec::new(),
+            cvar_95_usd: 0.0,
+            gamma_usd: 0.0,
+            net_carry: 0.0,
         }
     }
 }

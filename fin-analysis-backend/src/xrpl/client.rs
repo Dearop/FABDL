@@ -175,17 +175,34 @@ impl XrplClient for HttpXrplClient {
             .and_then(|s| s.parse().ok())
             .unwrap_or(0.0);
 
+        let kink_utilization: f64 = node
+            .get("KinkUtilization")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+
+        let liquidation_penalty: f64 = node
+            .get("LiquidationPenalty")
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0.0);
+        let _ = liquidation_penalty; // used by account_loans, stored on vault for reference
+
         let utilization_rate = if total_supply > 0.0 {
             total_borrow / total_supply
         } else {
             0.0
         };
 
+        let available_liquidity_usd = total_supply - total_borrow;
+
         Ok(LendingVaultSnapshot {
             asset: asset.to_string(),
             total_supply_usd: total_supply,
             total_borrow_usd: total_borrow,
             utilization_rate,
+            kink_utilization,
+            available_liquidity_usd,
             supply_apy,
             borrow_apy,
         })
@@ -253,6 +270,34 @@ impl XrplClient for HttpXrplClient {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0.0);
 
+                let liquidation_penalty_pct: f64 = obj
+                    .get("LiquidationPenalty")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0.0);
+
+                // Compute liquidation price analytically:
+                // liquidation_price = amount_borrowed_usd * liquidation_threshold / collateral_units
+                // Use liquidation_threshold = 1.0 if protocol value unavailable.
+                let liquidation_threshold: f64 = obj
+                    .get("LiquidationThreshold")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(1.0);
+
+                let collateral_units: f64 = obj
+                    .get("CollateralAmount")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse().ok())
+                    .map(|drops: f64| drops / 1_000_000.0)
+                    .unwrap_or(0.0);
+
+                let liquidation_price = if collateral_units > 0.0 {
+                    amount_borrowed_usd * liquidation_threshold / collateral_units
+                } else {
+                    0.0
+                };
+
                 let term_days: Option<u32> = obj
                     .get("TermDays")
                     .and_then(|v| v.as_u64())
@@ -264,6 +309,8 @@ impl XrplClient for HttpXrplClient {
                     collateral_asset,
                     collateral_usd,
                     health_factor,
+                    liquidation_price,
+                    liquidation_penalty_pct,
                     borrow_apy,
                     term_days,
                 })

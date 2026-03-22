@@ -164,7 +164,21 @@ pub async fn run(
     }
 
     summary.lending_vaults = lending_vaults;
-    summary.open_loans = open_loans;
+    summary.open_loans = open_loans.clone();
+
+    // Recompute net_carry with weighted borrow APY from open loans.
+    let total_borrowed: f64 = open_loans.iter().map(|l| l.amount_borrowed_usd).sum();
+    let weighted_borrow_apy = if total_borrowed > 0.0 {
+        open_loans
+            .iter()
+            .map(|l| l.borrow_apy * l.amount_borrowed_usd)
+            .sum::<f64>()
+            / total_borrowed
+    } else {
+        0.0
+    };
+    summary.net_carry =
+        summary.fee_apr - weighted_borrow_apy - summary.impermanent_loss_pct.abs() / 100.0;
 
     Ok(summary)
 }

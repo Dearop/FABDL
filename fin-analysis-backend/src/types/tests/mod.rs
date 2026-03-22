@@ -83,9 +83,13 @@ fn round_trip_portfolio_risk_summary() {
             sharpe: 1.2,
             var_95_usd: 800.0,
             lp_share_pct: 0.025,
+            gamma_usd: -100_000.0,
         }],
         lending_vaults: Vec::new(),
         open_loans: Vec::new(),
+        cvar_95_usd: 1_000.0,
+        gamma_usd: -100_000.0,
+        net_carry: 0.10,
     };
 
     let json = serde_json::to_string(&summary).unwrap();

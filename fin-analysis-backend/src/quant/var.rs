@@ -43,3 +43,40 @@ pub fn historical_var_95(
     // VaR is the absolute value of the 5th-percentile loss.
     Ok(pnl_scenarios[idx].min(0.0).abs())
 }
+
+/// Compute 95 % 1-day CVaR (Expected Shortfall) for a position.
+///
+/// CVaR is the mean of all losses that exceed the VaR threshold, i.e. the
+/// mean of `sorted_losses[0..floor(0.05 * n)]` (the worst 5 % of scenarios).
+pub fn historical_cvar_95(
+    position_value_usd: f64,
+    price_history: &[PricePoint],
+) -> Option<f64> {
+    if price_history.len() < MIN_HISTORY_POINTS {
+        return None;
+    }
+
+    let mut pnl_scenarios: Vec<f64> = price_history
+        .windows(2)
+        .map(|w| {
+            let ret = (w[1].xrp_usd / w[0].xrp_usd).ln();
+            position_value_usd * (ret.exp() - 1.0)
+        })
+        .collect();
+
+    // Sort ascending: most negative (worst loss) first.
+    pnl_scenarios.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let tail_count = (0.05 * pnl_scenarios.len() as f64).floor() as usize;
+    if tail_count == 0 {
+        return None;
+    }
+
+    let tail_mean = pnl_scenarios[..tail_count]
+        .iter()
+        .sum::<f64>()
+        / tail_count as f64;
+
+    // CVaR is the absolute value of the mean tail loss.
+    Some(tail_mean.min(0.0).abs())
+}
