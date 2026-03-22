@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
-import { generateStrategies, executeStrategy } from '@/services/api'
-import type { Strategy } from '@/services/api'
+import { generateStrategies } from '@/services/api'
+import { buildAndSubmitStrategy } from '@/services/xrplTransactions'
+import type { Strategy } from '@/lib/types'
+import { PoolRegistryProvider, usePoolRegistry } from '@/contexts/PoolRegistryContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -11,8 +13,10 @@ import { Spinner } from '@/components/ui/spinner'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Toaster } from '@/components/ui/toaster'
 import { useToast } from '@/hooks/use-toast'
+import { useWallet } from '@/hooks/useWallet'
+import { KeyEntryModal } from '@/components/KeyEntryModal'
 import { cn } from '@/lib/utils'
-import { Send, Wallet, ArrowRight, Check, X, Bot } from 'lucide-react'
+import { Send, Wallet, ArrowRight, Check, X, Bot, KeyRound } from 'lucide-react'
 
 // --------------- Types ---------------
 
@@ -37,19 +41,47 @@ function riskBadge(score: number) {
   return { label: 'High', cls: 'bg-red-500/15 text-red-400 border-red-500/30' }
 }
 
-// --------------- Page Component ---------------
+function truncateAddress(address: string) {
+  return `r...${address.slice(-4)}`
+}
+
+const PROVIDER_LABELS: Record<string, string> = {
+  'key-entry': 'devnet',
+  otsu: 'otsu',
+  crossmark: 'identity only',
+}
+
+// --------------- Page Shell (provides pool registry) ---------------
 
 export default function TradingPage() {
-  const walletId = 'rXXXdemo1234567890'
+  const wallet = useWallet()
+  return (
+    <PoolRegistryProvider walletAddress={wallet.address}>
+      <TradingPageInner wallet={wallet} />
+    </PoolRegistryProvider>
+  )
+}
+
+// --------------- Inner Page (consumes pool registry) ---------------
+
+function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) {
+  const walletId = wallet.address ?? ''
+  const { pools, isLoading: poolsLoading, error: poolsError } = usePoolRegistry()
 
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isExecuting, setIsExecuting] = useState<string | null>(null)
+  const [keyEntryOpen, setKeyEntryOpen] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
+
+  const canSign =
+    wallet.address !== null &&
+    wallet.providerType !== 'crossmark' &&
+    !poolsLoading
 
   // Derived: latest strategies from most recent assistant message
   const latestStrategies = useMemo(() => {
@@ -66,10 +98,23 @@ export default function TradingPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, isLoading])
 
+  // Connect handler (auto-detect extension)
+  const handleConnect = useCallback(async () => {
+    try {
+      await wallet.connect()
+    } catch (err) {
+      toast({
+        title: 'Wallet connection failed',
+        description: err instanceof Error ? err.message : 'Could not connect wallet',
+        variant: 'destructive',
+      })
+    }
+  }, [wallet, toast])
+
   // Send handler
   const handleSend = useCallback(async () => {
     const query = inputValue.trim()
-    if (!query || isLoading) return
+    if (!query || isLoading || !wallet.address) return
 
     setInputValue('')
     setMessages(prev => [...prev, { id: nextId(), role: 'user', content: query }])
@@ -102,16 +147,36 @@ export default function TradingPage() {
       setIsLoading(false)
       inputRef.current?.focus()
     }
-  }, [inputValue, isLoading, walletId])
+  }, [inputValue, isLoading, walletId, wallet.address])
 
-  // Execute handler
+  // Execute handler — builds real XRPL transactions and submits
   const handleExecute = useCallback(async (strategyId: string) => {
     if (isExecuting) return
-    setIsExecuting(strategyId)
 
+    if (wallet.providerType === 'crossmark') {
+      toast({
+        title: 'Cannot Execute',
+        description: 'Crossmark is identity-only and cannot sign devnet transactions. Reconnect with Key Entry or Otsu.',
+        variant: 'destructive',
+      })
+      return
+    }
+
+    const strategy = latestStrategies.find(s => s.id === strategyId)
+    if (!strategy || !wallet.address) return
+
+    setIsExecuting(strategyId)
     try {
-      await executeStrategy(strategyId, walletId)
-      toast({ title: 'Strategy Executed', description: 'Transaction submitted successfully.' })
+      const result = await buildAndSubmitStrategy(
+        strategy,
+        wallet.address,
+        wallet.signAndSubmit,
+        pools,
+      )
+      toast({
+        title: 'Strategy Executed',
+        description: `Transaction hash: ${result.txHash.slice(0, 12)}...`,
+      })
     } catch (err) {
       toast({
         title: 'Execution Failed',
@@ -121,7 +186,7 @@ export default function TradingPage() {
     } finally {
       setIsExecuting(null)
     }
-  }, [isExecuting, walletId, toast])
+  }, [isExecuting, wallet, latestStrategies, toast, pools])
 
   // Keyboard handler
   const handleKeyDown = useCallback(
@@ -134,6 +199,8 @@ export default function TradingPage() {
     [handleSend],
   )
 
+  const sendDisabled = !inputValue.trim() || isLoading || !wallet.address
+
   // ====================== JSX ======================
 
   return (
@@ -142,17 +209,76 @@ export default function TradingPage() {
       <header className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
         <h1 className="text-lg font-semibold text-foreground">AI Trading Assistant</h1>
         <div className="flex items-center gap-2">
-          <Input
-            readOnly
-            value={walletId}
-            className="w-48 text-xs font-mono bg-muted"
-          />
-          <Button variant="outline" size="sm" onClick={() => {}}>
-            <Wallet className="h-4 w-4 mr-1" />
-            Connect
-          </Button>
+          {wallet.address ? (
+            <>
+              <span className="text-xs font-mono bg-muted px-3 py-1.5 rounded-md border border-border">
+                {truncateAddress(wallet.address)}
+              </span>
+              {wallet.providerType && (
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    'text-[10px]',
+                    wallet.providerType === 'crossmark'
+                      ? 'border-amber-500/30 text-amber-400'
+                      : 'border-border text-muted-foreground',
+                  )}
+                >
+                  {PROVIDER_LABELS[wallet.providerType]}
+                </Badge>
+              )}
+              <Button variant="outline" size="sm" onClick={wallet.disconnect}>
+                <Wallet className="h-4 w-4 mr-1" />
+                Disconnect
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleConnect}
+                disabled={wallet.isConnecting}
+              >
+                {wallet.isConnecting ? (
+                  <Spinner className="h-4 w-4 mr-1" />
+                ) : (
+                  <Wallet className="h-4 w-4 mr-1" />
+                )}
+                {wallet.isConnecting ? 'Connecting...' : 'Connect Wallet'}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setKeyEntryOpen(true)}
+              >
+                <KeyRound className="h-4 w-4 mr-1" />
+                Use Key
+              </Button>
+            </>
+          )}
         </div>
       </header>
+
+      {/* ---- Devnet Banner ---- */}
+      {wallet.providerType === 'key-entry' && (
+        <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 text-xs text-amber-400 text-center">
+          Connected to XRPL Lending Devnet — transactions use devnet funds only
+        </div>
+      )}
+
+      {/* ---- Pool Registry Status ---- */}
+      {poolsLoading && (
+        <div className="bg-muted/50 border-b border-border px-4 py-1.5 text-xs text-muted-foreground text-center flex items-center justify-center gap-2">
+          <Spinner className="h-3 w-3" />
+          Loading pool registry…
+        </div>
+      )}
+      {poolsError && (
+        <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-1.5 text-xs text-destructive text-center">
+          Pool registry error: {poolsError}
+        </div>
+      )}
 
       {/* ---- Main Content ---- */}
       <div className="flex flex-1 overflow-hidden flex-col lg:flex-row">
@@ -209,17 +335,23 @@ export default function TradingPage() {
                 value={inputValue}
                 onChange={e => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Describe your trading goal..."
-                disabled={isLoading}
+                placeholder={wallet.address ? 'Describe your trading goal...' : 'Connect wallet to continue'}
+                disabled={isLoading || !wallet.address}
               />
               <Button
                 size="icon"
                 onClick={handleSend}
-                disabled={!inputValue.trim() || isLoading}
+                disabled={sendDisabled}
+                title={!wallet.address ? 'Connect wallet to continue' : undefined}
               >
                 {isLoading ? <Spinner className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               </Button>
             </div>
+            {!wallet.address && (
+              <p className="text-xs text-muted-foreground mt-2 text-center">
+                Connect wallet to continue
+              </p>
+            )}
           </div>
         </div>
 
@@ -239,6 +371,7 @@ export default function TradingPage() {
                     strategy={strategy}
                     isExecuting={isExecuting}
                     onExecute={handleExecute}
+                    canSign={canSign}
                   />
                 ))}
               </div>
@@ -246,6 +379,17 @@ export default function TradingPage() {
           )}
         </div>
       </div>
+
+      {/* ---- Key Entry Modal ---- */}
+      <KeyEntryModal
+        open={keyEntryOpen}
+        onOpenChange={setKeyEntryOpen}
+        onConnect={async (secret) => {
+          await wallet.connectWithKey(secret)
+          setKeyEntryOpen(false)
+        }}
+        onGenerate={() => wallet.generateNewWallet()}
+      />
 
       <Toaster />
     </div>
@@ -258,10 +402,12 @@ function StrategyCard({
   strategy,
   isExecuting,
   onExecute,
+  canSign,
 }: {
   strategy: Strategy
   isExecuting: string | null
   onExecute: (id: string) => void
+  canSign: boolean
 }) {
   const { label, cls } = riskBadge(strategy.risk_score)
 
@@ -344,7 +490,8 @@ function StrategyCard({
           className="mt-auto w-full"
           size="sm"
           onClick={() => onExecute(strategy.id)}
-          disabled={isExecuting !== null}
+          disabled={isExecuting !== null || !canSign}
+          title={!canSign ? 'Connect a signing wallet to execute' : undefined}
         >
           {isExecuting === strategy.id ? (
             <>

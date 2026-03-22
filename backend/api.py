@@ -105,6 +105,15 @@ LENDING STRATEGY GUIDANCE:
 - "lend" action: supply asset to a vault, earn interest. asset_in = supplied asset, asset_out = same asset.
 - "borrow" action: borrow from vault. asset_in = collateral, asset_out = borrowed asset.
 - Delta-neutral LP: borrow risky asset + deposit into AMM = hedged IL. Higher risk_score (5-7).
+
+DECISION METRICS — use these when lending/borrowing data is present in the portfolio summary:
+- Net carry: the summary provides net_carry (fee_APR - borrow_APY - expected_IL). If net_carry < 0, the delta-neutral strategy costs more than it earns — flag this explicitly in cons and cap risk_score at 5.
+- Health factor: any open loan with health_factor < 1.5 is at elevated liquidation risk — add +2 to risk_score for any strategy that increases borrowing. If health_factor < 1.2, the conservative strategy must recommend partial repayment.
+- Liquidation price: state the liquidation price explicitly in the strategy description when recommending borrow actions — e.g. "liquidation triggers at $0.31 XRP".
+- Liquidation penalty: factor liquidation_penalty_pct into worst-case projected_return_7d for any strategy involving open loans. Worst case = current loss + (collateral_usd * liquidation_penalty_pct) if liquidation_price is within the VaR range.
+- Utilization and liquidity: if utilization_rate > kink_utilization, the borrow APY may spike further — flag in cons. If available_liquidity_usd < position value, warn that full withdrawal may not be possible immediately.
+- CVaR vs VaR: the summary provides both var_95_usd and cvar_95_usd. For levered positions (any open loans), use cvar_95_usd in your worst_case projection — it better captures tail loss including liquidation gap risk.
+- Gamma: the summary provides gamma_usd (negative for all LP positions). For delta-neutral strategies, note that delta ≈ 0 but gamma remains negative — large price moves in either direction still cause losses. Mention this in cons when recommending levered LP.
 - Net hedging cost ratio = borrowing_cost / fee_APR. If > 1.0, the hedge costs more than it protects — flag in cons.
 """
 

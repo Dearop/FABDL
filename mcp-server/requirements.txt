@@ -1,0 +1,4 @@
+mcp
+grpcio
+httpx
+# Proto stubs are imported from ../llm-orchestration/src (no separate package needed)
