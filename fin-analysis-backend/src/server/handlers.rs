@@ -24,14 +24,23 @@ pub async fn analyze_handler(
     State(pipeline): State<Arc<dyn AnalysisPipeline>>,
     Json(intent): Json<IntentRouterOutput>,
 ) -> Response {
+    let wallet = intent.parameters.wallet_address.clone().unwrap_or_else(|| "unknown".to_string());
+    tracing::info!(action = ?intent.action, scope = ?intent.scope, wallet = %wallet, "analyze request received");
+
     match pipeline.run(intent).await {
-        Ok(summary) => (
-            StatusCode::OK,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            summary.render_prompt(),
-        )
-            .into_response(),
-        Err(e) => error_response(e),
+        Ok(summary) => {
+            tracing::info!(wallet = %wallet, "analysis complete — returning prompt to backend");
+            (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                summary.render_prompt(),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::error!(wallet = %wallet, error = %e, "analysis pipeline failed");
+            error_response(e)
+        }
     }
 }
 

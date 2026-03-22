@@ -3,6 +3,8 @@
  * Handles all HTTP calls to the backend API
  */
 
+import type { Strategy } from '@/lib/types'
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 // Types
@@ -14,35 +16,11 @@ export interface IntentResponse {
   parameters: Array<{ key: string; value: string }>
 }
 
-export interface TradeAction {
-  action: 'swap' | 'deposit' | 'withdraw'
-  asset_in?: string
-  asset_out?: string
-  amount?: number
-  pool?: string
-  estimated_slippage?: number
-  [key: string]: any
-}
-
-export interface Strategy {
-  id: string
-  title: string
-  description: string
-  risk_score: number
-  projected_return_7d: {
-    best_case: string
-    expected: string
-    worst_case: string
-  }
-  trade_actions: TradeAction[]
-  pros: string[]
-  cons: string[]
-}
-
 export interface GenerateStrategiesResponse {
-  intent: IntentResponse
+  intent?: IntentResponse
   strategies: Strategy[]
   wallet_id: string
+  mode?: string
 }
 
 // ==================== Wallet Endpoints ====================
@@ -84,27 +62,46 @@ export async function classifyQuery(query: string, walletId: string) {
 }
 
 /**
- * Generate 3 trading strategies based on a user query
- * This is the main workflow endpoint
+ * Generate 3 trading strategies based on a user query.
+ *
+ * @param network - current XRPL network label
  */
 export async function generateStrategies(
   query: string,
-  walletId: string
+  walletId: string,
+  network: string = 'devnet',
 ): Promise<GenerateStrategiesResponse> {
-  const response = await fetch(`${API_BASE}/strategies/generate`, {
+  console.debug('[frontend/api] generateStrategies request', {
+    endpoint: `${API_BASE}/strategies/generate-mcp`,
+    walletId,
+    query,
+    network,
+  })
+  const response = await fetch(`${API_BASE}/strategies/generate-mcp`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ user_query: query, wallet_id: walletId })
+    body: JSON.stringify({ user_query: query, wallet_id: walletId, network }),
   })
 
   if (!response.ok) {
     const error = await response.json().catch(() => ({}))
+    console.error('[frontend/api] generateStrategies failed', {
+      status: response.status,
+      statusText: response.statusText,
+      error,
+    })
     throw new Error(
       error.detail || `Failed to generate strategies: ${response.statusText}`
     )
   }
 
-  return response.json()
+  const data = await response.json()
+  console.debug('[frontend/api] generateStrategies response', {
+    mode: data.mode,
+    strategyCount: data.strategies?.length ?? 0,
+    strategyIds: data.strategies?.map((strategy: Strategy) => strategy.id) ?? [],
+  })
+  return data
 }
 
 // ==================== Strategy Execution ====================

@@ -122,6 +122,14 @@ impl QuantModel for DefaultQuantModel {
         let sharpe = sharpe::sharpe_ratio(price_history, self.risk_free_rate)
             .unwrap_or(0.0);
 
+        // ---- Gamma (constant-product AMM) ----
+        // For CP AMM: gamma ≈ -0.5 * position_value / price²
+        let gamma_usd = if price > 0.0 {
+            -0.5 * position_value_usd / (price * price)
+        } else {
+            0.0
+        };
+
         Ok(PositionRisk {
             pool_label: pool.pool_label.clone(),
             position_value_usd,
@@ -135,6 +143,7 @@ impl QuantModel for DefaultQuantModel {
             sharpe,
             var_95_usd: var_95,
             lp_share_pct: lp_share,
+            gamma_usd,
         })
     }
 
@@ -191,6 +200,16 @@ impl QuantModel for DefaultQuantModel {
         let be_upper = position_risks.iter().map(|r| r.break_even_upper).sum::<f64>()
             / position_risks.len() as f64;
 
+        // Portfolio-level gamma (sum across positions).
+        let gamma_usd: f64 = position_risks.iter().map(|r| r.gamma_usd).sum();
+
+        // CVaR (expected shortfall).
+        let cvar_95_usd = var::historical_cvar_95(total_value, price_history).unwrap_or(0.0);
+
+        // Net carry: fee_apr - weighted_borrow_apy - |IL_pct|/100.
+        // weighted_borrow_apy is 0.0 until loans are attached in the pipeline.
+        let net_carry = fee_apr - il_pct.abs() / 100.0;
+
         Ok(PortfolioRiskSummary {
             total_value_usd: total_value,
             impermanent_loss_pct: il_pct,
@@ -205,6 +224,12 @@ impl QuantModel for DefaultQuantModel {
             break_even_upper: be_upper,
             fee_apr,
             positions: position_risks,
+            lending_vaults: Vec::new(),
+            open_loans: Vec::new(),
+            cvar_95_usd,
+            gamma_usd,
+            net_carry,
+            analysis_warnings: Vec::new(),
         })
     }
 }

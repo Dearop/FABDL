@@ -18,14 +18,22 @@ async fn main() {
 
     // Configuration from environment (with sensible defaults for local dev).
     let xrpl_endpoint = std::env::var("XRPL_ENDPOINT")
-        .unwrap_or_else(|_| "https://xrplcluster.com".to_string());
+        .unwrap_or_else(|_| "https://lend.devnet.rippletest.net:51234".to_string());
 
     let port: u16 = std::env::var("PORT")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(3001);
 
-    tracing::info!(endpoint = %xrpl_endpoint, port, "starting fin-analysis-backend");
+    let network = if xrpl_endpoint.contains("lend.devnet") {
+        "lending-devnet"
+    } else if xrpl_endpoint.contains("altnet") || xrpl_endpoint.contains("rippletest") {
+        "xrpl-testnet-like"
+    } else {
+        "custom"
+    };
+
+    tracing::info!(endpoint = %xrpl_endpoint, network, port, "starting fin-analysis-backend");
 
     let xrpl_client = HttpXrplClient::new(xrpl_endpoint);
     let pipeline = Arc::new(DefaultPipeline::new(xrpl_client));

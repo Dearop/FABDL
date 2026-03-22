@@ -6,6 +6,7 @@ use crate::{
     error::AnalysisError,
     types::{
         pool::{PoolSnapshot, PricePoint},
+        quant::{LendingVaultSnapshot, LoanPosition},
         xrpl::{
             AccountLinesResponse, AccountTxResponse, AmountField, AmmInfo, AmmInfoResponse,
             LpTokenInfo, TrustLine,
@@ -22,6 +23,7 @@ pub struct MockXrplClient {
     pub xrp_price: f64,
     pub amm_response: Option<AmmInfoResponse>,
     pub account_lines: Vec<TrustLine>,
+    pub account_lines_error: Option<String>,
 }
 
 impl Default for MockXrplClient {
@@ -30,6 +32,7 @@ impl Default for MockXrplClient {
             xrp_price: 0.50,
             amm_response: Some(make_amm_response()),
             account_lines: vec![make_lp_line()],
+            account_lines_error: None,
         }
     }
 }
@@ -80,6 +83,10 @@ impl XrplClient for MockXrplClient {
     }
 
     async fn account_lines(&self, _account: &str) -> Result<AccountLinesResponse, AnalysisError> {
+        if let Some(error) = &self.account_lines_error {
+            return Err(AnalysisError::XrplRpc(error.clone()));
+        }
+
         Ok(AccountLinesResponse {
             lines: self.account_lines.clone(),
             marker: None,
@@ -111,6 +118,23 @@ impl XrplClient for MockXrplClient {
             })
             .collect();
         Ok(points)
+    }
+
+    async fn lending_vault_info(
+        &self,
+        asset: &str,
+    ) -> Result<LendingVaultSnapshot, AnalysisError> {
+        Ok(LendingVaultSnapshot {
+            asset: asset.to_string(),
+            ..Default::default()
+        })
+    }
+
+    async fn account_loans(
+        &self,
+        _wallet: &str,
+    ) -> Result<Vec<LoanPosition>, AnalysisError> {
+        Ok(vec![])
     }
 
     async fn fetch_pool_snapshot(

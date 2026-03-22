@@ -16,6 +16,7 @@ use crate::{
     error::AnalysisError,
     types::{
         pool::{PoolSnapshot, PricePoint},
+        quant::{LendingVaultSnapshot, LoanPosition},
         xrpl::{AccountLinesResponse, AccountTxResponse, AmmInfoResponse},
     },
 };
@@ -60,6 +61,18 @@ pub trait XrplClient: Send + Sync {
         wallet: &str,
         pool_label: &str,
     ) -> Result<PoolSnapshot, AnalysisError>;
+
+    /// Fetch XLS-66d lending vault info for a given asset.
+    async fn lending_vault_info(
+        &self,
+        asset: &str,
+    ) -> Result<LendingVaultSnapshot, AnalysisError>;
+
+    /// Fetch XLS-66d open loan positions for a wallet.
+    async fn account_loans(
+        &self,
+        wallet: &str,
+    ) -> Result<Vec<LoanPosition>, AnalysisError>;
 }
 
 #[cfg(test)]

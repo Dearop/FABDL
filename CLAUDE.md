@@ -45,6 +45,7 @@ Load based on the area you're working in:
 | Area | File |
 |---|---|
 | Overall architecture, data flow, tech stack, API specs | `architecture/SYSTEM-DESIGN.md` |
+| Frontend wallet integration: providers, signing flow, pool registry, tx construction | `architecture/WALLET-INTEGRATION.md` |
 | IL, delta, VaR, Sharpe formulas; strategy taxonomy | `quant/RISK-MODELS.md` |
 | Rust smart contract design, security features, testing | `bedrock/SMART-CONTRACT.md` |
 | Intent router & strategy generator prompts, safety guardrails | `llm-orchestration/PROMPTS.md` |

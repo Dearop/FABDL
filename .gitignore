@@ -6,31 +6,24 @@ frontend/dist/
 frontend/.env.local
 frontend/.env.*.local
 
-# Backend (Python)
-backend/__pycache__/
-backend/*.pyc
-backend/*.pyo
-backend/venv/
-backend/env/
-backend/.env
-backend/.env.local
-backend/*.egg-info/
-backend/.pytest_cache/
+# Vendored packages (contain compiled C extensions — machine/OS/Python-version specific)
+backend/vendor/
 
-# LLM Orchestration
-llm-orchestration/__pycache__/
-llm-orchestration/**/__pycache__/
-llm-orchestration/*.pyc
-llm-orchestration/venv/
-llm-orchestration/env/
-llm-orchestration/.env
-llm-orchestration/.pytest_cache/
+# Python (all locations)
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/venv/
+**/env/
+**/.env
+**/.env.local
+**/*.egg-info/
+**/.pytest_cache/
 
-# Rust (All projects)
+# Rust (all crates)
 **/target/
 Cargo.lock
 **/*.rs.bk
-**/Cargo.lock
 
 # IDE / Editor
 .vscode/settings.json

@@ -13,7 +13,7 @@ import {
 import { RiskIndicator } from '@/components/risk-indicator'
 import { StrategyDetailsModal } from '@/components/strategy-details-modal'
 import { ConfirmTransactionModal } from '@/components/confirm-transaction-modal'
-import { Check, X, ArrowRight, Info, TrendingUp, TrendingDown, Target } from 'lucide-react'
+import { Check, X, ArrowRight, Info, TrendingUp, TrendingDown, Target, Landmark, HandCoins } from 'lucide-react'
 
 interface StrategyCardProps {
   strategy: Strategy
@@ -66,16 +66,52 @@ export function StrategyCard({ strategy }: StrategyCardProps) {
               <AccordionContent>
                 <div className="space-y-2">
                   {strategy.trade_actions.map((action, index) => (
-                    <div key={index} className="flex items-center gap-2 text-sm p-2 rounded bg-muted/50">
-                      <span className="capitalize font-medium text-foreground">{action.action}</span>
-                      <span className="text-muted-foreground">
-                        {action.amount} {action.asset_in} 
-                      </span>
-                      <ArrowRight className="h-3 w-3 text-muted-foreground" />
-                      <span className="text-muted-foreground">{action.asset_out}</span>
-                      <span className="ml-auto text-xs text-muted-foreground">
-                        ~{action.estimated_slippage}% slip
-                      </span>
+                    <div key={index} className="flex flex-col gap-1 text-sm p-2 rounded bg-muted/50">
+                      <div className="flex items-center gap-2">
+                        {(action.action === 'lend' || action.action === 'borrow') ? (
+                          action.action === 'lend' ? <Landmark className="h-3.5 w-3.5 text-primary" /> : <HandCoins className="h-3.5 w-3.5 text-risk-medium" />
+                        ) : null}
+                        <span className="capitalize font-medium text-foreground">{action.action}</span>
+                        <span className="text-muted-foreground">
+                          {action.amount} {action.asset_in}
+                        </span>
+                        {action.action !== 'lend' && (
+                          <>
+                            <ArrowRight className="h-3 w-3 text-muted-foreground" />
+                            <span className="text-muted-foreground">
+                              {action.amount2 ? `${action.amount2} ` : ''}{action.asset_out}
+                            </span>
+                          </>
+                        )}
+                        {action.estimated_slippage > 0 && (
+                          <span className="ml-auto text-xs text-muted-foreground">
+                            ~{action.estimated_slippage}% slip
+                          </span>
+                        )}
+                      </div>
+                      {/* Extra context for AMM and lending actions */}
+                      <div className="flex gap-2 ml-5">
+                        {action.pool && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+                            {action.pool}
+                          </span>
+                        )}
+                        {action.deposit_mode && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            {action.deposit_mode.replace('_', '-')}
+                          </span>
+                        )}
+                        {action.interest_rate != null && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-risk-low/10 text-risk-low">
+                            {action.interest_rate}% APR
+                          </span>
+                        )}
+                        {action.term_days != null && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                            {action.term_days}d term
+                          </span>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>

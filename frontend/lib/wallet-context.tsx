@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useState, useCallback, type ReactNode } from 'react'
 import type { WalletInfo, AppStatus, Strategy } from './types'
-import { OtsuWallet } from './otsu-wallet'
 
 interface WalletContextType {
   wallet: WalletInfo | null
@@ -12,7 +11,7 @@ interface WalletContextType {
   txHash: string | null
   error: string | null
   lastQuery: string
-  connectWallet: () => Promise<void>
+  connectWallet: (address: string) => Promise<void>
   disconnectWallet: () => void
   setStatus: (status: AppStatus) => void
   setStrategies: (strategies: Strategy[]) => void
@@ -34,46 +33,25 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null)
   const [lastQuery, setLastQuery] = useState('')
 
-  const connectWallet = useCallback(async () => {
+  const connectWallet = useCallback(async (address: string) => {
     setStatus('connecting')
     setError(null)
 
-    try {
-      if (!OtsuWallet.isInstalled()) {
-        throw new Error('Otsu Wallet extension not found. Please install it first.')
-      }
-
-      const otsu = new OtsuWallet()
-      const { address } = await otsu.connect({ scopes: ['read', 'sign', 'submit'] })
-
-      const networkInfo = await otsu.getNetwork()
-
-      // New accounts don't exist on-ledger until funded (XRPL base reserve = 10 XRP).
-      // getBalance() throws "Account not found" in that case — handle it gracefully.
-      let balance = '0 XRP (unfunded)'
-      try {
-        const balanceInfo = await otsu.getBalance()
-        balance = `${balanceInfo.available} XRP`
-      } catch {
-        // Account not yet funded — connection still valid
-      }
-
-      setWallet({
-        address,
-        balance,
-        network: networkInfo.networkId,
-      })
-      setStatus('ready')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to connect wallet')
+    if (!address.startsWith('r') || address.length < 20) {
+      setError('Invalid XRPL address.')
       setStatus('disconnected')
+      return
     }
+
+    setWallet({
+      address,
+      balance: 'testnet',
+      network: process.env.NEXT_PUBLIC_XRPL_NETWORK || 'testnet',
+    })
+    setStatus('ready')
   }, [])
 
   const disconnectWallet = useCallback(() => {
-    if (OtsuWallet.isInstalled()) {
-      new OtsuWallet().disconnect().catch(() => {})
-    }
     setWallet(null)
     setStatus('disconnected')
     setStrategies([])
