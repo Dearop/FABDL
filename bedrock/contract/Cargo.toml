@@ -7,8 +7,9 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Local stubs used for native/test builds.
-# `bedrock build` replaces these with the real xrpl-commons crates at WASM compile time.
+# On native: stubs provide in-memory state + typed function signatures for tests.
+# On wasm32 (bedrock build): stubs wire directly to host_lib imports and generate
+# the correct no-arg exported functions per the Bedrock calling convention.
 xrpl-wasm-macros = { path = "../xrpl-wasm-macros-stub" }
 xrpl-wasm-std    = { path = "../xrpl-wasm-std-stub" }
 

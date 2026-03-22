@@ -1,0 +1,67 @@
+{
+  "contract_name": "uniswap_v3_xrpl_manager",
+  "functions": [
+    {
+      "name": "setup",
+      "parameters": [
+        { "name": "pool", "type": "ACCOUNT", "flag": 0, "description": "Pool contract address this manager governs" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, 4 if already configured"
+      }
+    },
+    {
+      "name": "initialize_pool",
+      "parameters": [
+        { "name": "sqrt_price_lo", "type": "UINT64", "flag": 0, "description": "Lower 64 bits of initial sqrt price in Q64.64" },
+        { "name": "sqrt_price_hi", "type": "UINT64", "flag": 0, "description": "Upper 64 bits of initial sqrt price in Q64.64" },
+        { "name": "fee_bps", "type": "UINT16", "flag": 0, "description": "LP fee in basis points (e.g. 30 = 0.3%)" },
+        { "name": "protocol_fee_share_bps", "type": "UINT16", "flag": 0, "description": "Protocol share of fee in basis points" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "set_pause",
+      "parameters": [
+        { "name": "paused", "type": "UINT8", "flag": 0, "description": "1 to pause, 0 to unpause" },
+        { "name": "_pad0", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
+        { "name": "_pad1", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
+        { "name": "_pad2", "type": "UINT32", "flag": 0, "description": "Reserved (pass 0)" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "set_protocol_fee",
+      "parameters": [
+        { "name": "protocol_fee_share_bps", "type": "UINT16", "flag": 0, "description": "Protocol fee share in basis points (max 2500)" },
+        { "name": "_pad0", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
+        { "name": "_pad1", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
+        { "name": "_pad2", "type": "UINT32", "flag": 0, "description": "Reserved (pass 0)" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success, error code otherwise"
+      }
+    },
+    {
+      "name": "collect_protocol",
+      "parameters": [
+        { "name": "max_amount_0", "type": "UINT64", "flag": 0, "description": "Max token0 protocol fees to collect" },
+        { "name": "max_amount_1", "type": "UINT64", "flag": 0, "description": "Max token1 protocol fees to collect" },
+        { "name": "_pad0", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" },
+        { "name": "_pad1", "type": "UINT64", "flag": 0, "description": "Reserved (pass 0)" }
+      ],
+      "returns": {
+        "type": "UINT64",
+        "description": "Packed (collected_0: u32 << 32 | collected_1: u32) or 0 on error"
+      }
+    }
+  ]
+}

@@ -1,11 +1,11 @@
 [project]
-name = "my-contract2"
+name = "uniswap_v3_xrpl_contract"
 version = "0.1.0"
 authors = ["Your Name"]
 
 [build]
 source = "contract/src/lib.rs"
-output = "contract/target/wasm32-unknown-unknown/release"
+output = "target/wasm32-unknown-unknown/release"
 target = "wasm32-unknown-unknown"
 
 [local_node]

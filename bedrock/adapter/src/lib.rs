@@ -110,12 +110,10 @@ impl DualPathAdapter {
         self.validate_slippage(req)?;
 
         let amount_out = uniswap_v3_xrpl_contract::swap_exact_in(
-            req.sender,
-            req.amount_in,
-            req.min_amount_out,
-            if req.zero_for_one { 1 } else { 0 },
-            0,
-        );
+            req.amount_in as u32,
+            req.min_amount_out as u32,
+            if req.zero_for_one { 1u8 } else { 0u8 },
+        ) as u64;
 
         if amount_out == 0 && req.min_amount_out > 0 {
             return Err(AdapterError::ContractError(
@@ -142,12 +140,10 @@ impl DualPathAdapter {
         self.validate_slippage(req)?;
 
         let amount_out = uniswap_v3_xrpl_contract::swap_exact_in(
-            req.sender,
-            req.amount_in,
-            req.min_amount_out,
-            if req.zero_for_one { 1 } else { 0 },
-            0,
-        );
+            req.amount_in as u32,
+            req.min_amount_out as u32,
+            if req.zero_for_one { 1u8 } else { 0u8 },
+        ) as u64;
 
         if amount_out == 0 && req.min_amount_out > 0 {
             return Err(AdapterError::ContractError(
@@ -197,8 +193,8 @@ mod tests {
 
     fn setup_pool() {
         test_setup(owner(), 10);
-        uniswap_v3_xrpl_contract::initialize_pool(owner(), 0u64, 1u64, 30, 0);
-        uniswap_v3_xrpl_contract::mint(owner(), (-1000_i32) as u32, 1000, 1_000_000_000, 0);
+        uniswap_v3_xrpl_contract::initialize_pool(0u32, 30u16, 0u16);
+        uniswap_v3_xrpl_contract::mint((-1000_i32) as u32, 1000u32, 1_000_000_000u64);
     }
 
     fn req(amount_in: u64, zero_for_one: bool) -> SwapRequest {

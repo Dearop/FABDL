@@ -1,0 +1,18 @@
+{
+  "contract_name": "uniswap_v3_xrpl_contract",
+  "functions": [
+    {
+      "name": "set_manager",
+      "parameters": [
+        { "name": "mgr_lo", "type": "UINT64", "flag": 0, "description": "Bytes 0-7 of manager address (little-endian)" },
+        { "name": "mgr_mid", "type": "UINT64", "flag": 0, "description": "Bytes 8-15 of manager address (little-endian)" },
+        { "name": "mgr_hi", "type": "UINT32", "flag": 0, "description": "Bytes 16-19 of manager address (little-endian)" },
+        { "name": "pad", "type": "UINT32", "flag": 0, "description": "Reserved (pass 0)" }
+      ],
+      "returns": {
+        "type": "UINT32",
+        "description": "0 on success"
+      }
+    }
+  ]
+}

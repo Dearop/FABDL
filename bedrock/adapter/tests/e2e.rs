@@ -12,8 +12,8 @@ fn alice() -> [u8; 20] { [2u8; 20] }
 /// Initialise a pool with liquidity ready for adapter-level swap tests.
 fn setup_pool_with_liquidity() {
     test_setup(owner(), 10);
-    uniswap_v3_xrpl_contract::initialize_pool(owner(), 0u64, 1u64, 30, 0);
-    uniswap_v3_xrpl_contract::mint(owner(), (-1000_i32) as u32, 1000, 1_000_000_000, 0);
+    uniswap_v3_xrpl_contract::initialize_pool(0u32, 30u16, 0u16);
+    uniswap_v3_xrpl_contract::mint((-1000_i32) as u32, 1000u32, 1_000_000_000u64);
 }
 
 fn swap_req(amount_in: u64, zero_for_one: bool) -> SwapRequest {
