@@ -5,11 +5,9 @@ import {
   KeyEntryProvider,
   OtsuProvider,
   CrossmarkProvider,
-  networkForProvider,
   type WalletProvider,
   type ProviderType,
   type SignAndSubmitFn,
-  type XrplNetwork,
 } from '@/lib/wallet-providers'
 
 // --------------- Constants ---------------
@@ -23,7 +21,6 @@ export type WalletState = {
   address: string | null
   isConnecting: boolean
   providerType: ProviderType | null
-  network: XrplNetwork | null
   connect: () => Promise<void>
   connectWithKey: (secret: string) => Promise<void>
   generateNewWallet: () => { address: string; secret: string }
@@ -151,13 +148,10 @@ export function useWallet(): WalletState {
     [],
   )
 
-  const network = networkForProvider(providerType)
-
   return {
     address,
     isConnecting,
     providerType,
-    network,
     connect,
     connectWithKey,
     generateNewWallet,

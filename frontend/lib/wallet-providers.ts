@@ -4,31 +4,8 @@ import sdk from '@crossmarkio/sdk'
 
 // --------------- Constants ---------------
 
-/** All providers use the same XRPL network — configurable via env var. */
-const XRPL_WS =
-  process.env.NEXT_PUBLIC_XRPL_WS || 'wss://s.devnet.rippletest.net:51233/'
+const LENDING_DEVNET_WS = 'wss://s.devnet.rippletest.net:51233/'
 const STORAGE_KEY = 'xrpl_wallet'
-
-// --------------- Network Helpers ---------------
-
-export type XrplNetwork = 'devnet' | 'testnet' | 'lend-devnet'
-
-/** Current network label derived from the configured WS URL. */
-export function currentNetwork(): XrplNetwork {
-  const ws = XRPL_WS
-  if (ws.includes('lend.devnet')) return 'lend-devnet'
-  if (ws.includes('altnet')) return 'testnet'
-  return 'devnet'
-}
-
-export function networkForProvider(providerType: ProviderType | null): XrplNetwork | null {
-  if (!providerType || providerType === 'crossmark') return null
-  return currentNetwork()
-}
-
-export function getXrplWsUrl(): string {
-  return XRPL_WS
-}
 
 // --------------- Shared Types ---------------
 
@@ -80,7 +57,7 @@ export class KeyEntryProvider implements WalletProvider {
     }
 
     const wallet = Wallet.fromSecret(secret)
-    const client = new Client(XRPL_WS)
+    const client = new Client(LENDING_DEVNET_WS)
 
     try {
       await client.connect()

@@ -18,21 +18,21 @@ import {
   Layers,
 } from 'lucide-react'
 import type { Strategy } from '@/lib/types'
-import type { StrategyExecutionResult } from '@/services/xrplTransactions'
+
+interface ExecutionResult {
+  txHash: string
+  status: string
+}
 
 interface TransactionSuccessModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   strategy: Strategy | null
-  result: StrategyExecutionResult | null
+  result: ExecutionResult | null
 }
 
-function explorerUrl(hash: string, network: string): string {
-  if (network === 'testnet') {
-    return `https://testnet.xrpl.org/transactions/${hash}`
-  }
-  // lending devnet doesn't have a public explorer, fall back to testnet explorer
-  return `https://testnet.xrpl.org/transactions/${hash}`
+function explorerUrl(hash: string): string {
+  return `https://devnet.xrpl.org/transactions/${hash}`
 }
 
 export function TransactionSuccessModal({
@@ -60,8 +60,6 @@ export function TransactionSuccessModal({
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
-
-  const networkLabel = result.network === 'testnet' ? 'XRPL Testnet' : 'XRPL Lending Devnet'
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -104,54 +102,40 @@ export function TransactionSuccessModal({
           </div>
 
           {/* Transaction actions breakdown */}
-          {result.results.length > 0 && (
+          {strategy.trade_actions.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <Layers className="h-3.5 w-3.5" />
-                <span>Executed Actions ({result.results.length})</span>
+                <span>Executed Actions ({strategy.trade_actions.length})</span>
               </div>
               <div className="space-y-1.5">
-                {strategy.trade_actions.map((action, i) => {
-                  const txResult = result.results[i]
-                  return (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2"
-                    >
-                      <div className="flex items-center gap-2 text-sm">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
-                        <span className="capitalize font-medium text-foreground">
-                          {action.action}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {action.amount} {action.asset_in}
-                        </span>
-                        {action.action !== 'lend' && (
-                          <>
-                            <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                            <span className="text-muted-foreground">{action.asset_out}</span>
-                          </>
-                        )}
-                        {action.pool && (
-                          <Badge variant="outline" className="text-[9px] ml-1">
-                            {action.pool}
-                          </Badge>
-                        )}
-                      </div>
-                      {txResult && (
-                        <a
-                          href={explorerUrl(txResult.hash, result.network)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-primary hover:text-primary/80 transition-colors"
-                          title="View on explorer"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </a>
+                {strategy.trade_actions.map((action, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-3 py-2"
+                  >
+                    <div className="flex items-center gap-2 text-sm">
+                      <CheckCircle2 className="h-3.5 w-3.5 text-green-400 shrink-0" />
+                      <span className="capitalize font-medium text-foreground">
+                        {action.action}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {action.amount} {action.asset_in}
+                      </span>
+                      {action.action !== 'lend' && (
+                        <>
+                          <ArrowRight className="h-3 w-3 text-muted-foreground shrink-0" />
+                          <span className="text-muted-foreground">{action.asset_out}</span>
+                        </>
+                      )}
+                      {action.pool && (
+                        <Badge variant="outline" className="text-[9px] ml-1">
+                          {action.pool}
+                        </Badge>
                       )}
                     </div>
-                  )
-                })}
+                  </div>
+                ))}
               </div>
             </div>
           )}
@@ -161,7 +145,7 @@ export function TransactionSuccessModal({
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-xs font-medium text-muted-foreground">Transaction Hash</span>
               <Badge variant="outline" className="text-[9px]">
-                {networkLabel}
+                XRPL Devnet
               </Badge>
             </div>
             <div className="flex items-center gap-2">
@@ -196,7 +180,7 @@ export function TransactionSuccessModal({
             <Button
               className="flex-1"
               onClick={() =>
-                window.open(explorerUrl(result.txHash, result.network), '_blank')
+                window.open(explorerUrl(result.txHash), '_blank')
               }
             >
               <ExternalLink className="h-4 w-4 mr-1.5" />

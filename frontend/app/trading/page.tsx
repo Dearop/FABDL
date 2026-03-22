@@ -5,7 +5,6 @@ import { generateStrategies } from '@/services/api'
 import {
   buildAndSubmitStrategy,
   getStrategyExecutionSupport,
-  type StrategyExecutionResult,
 } from '@/services/xrplTransactions'
 import { TransactionSuccessModal } from '@/components/TransactionSuccessModal'
 import PnLChart from '@/components/PnLChart'
@@ -69,7 +68,7 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
   // Transaction success modal state
   const [successModalOpen, setSuccessModalOpen] = useState(false)
   const [successStrategy, setSuccessStrategy] = useState<Strategy | null>(null)
-  const [successResult, setSuccessResult] = useState<StrategyExecutionResult | null>(null)
+  const [successResult, setSuccessResult] = useState<{ txHash: string; status: string } | null>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -83,10 +82,9 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
     console.debug('[trading/page] execute state', {
       walletAddress: wallet.address,
       providerType: wallet.providerType,
-      network: wallet.network,
       canSign,
     })
-  }, [wallet.address, wallet.providerType, wallet.network, canSign])
+  }, [wallet.address, wallet.providerType, canSign])
 
   const latestStrategies = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -130,7 +128,7 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
       const response = await generateStrategies(
         query,
         walletId,
-        wallet.network ?? 'devnet',
+        'devnet',
       )
       const count = response.strategies?.length ?? 0
       console.debug('[trading/page] strategies loaded', {
@@ -202,13 +200,11 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
       return
     }
 
-    const network = wallet.network ?? 'devnet'
     console.debug('[trading/page] execute strategy payload', {
       strategyId: strategy.id,
       title: strategy.title,
       tradeActions: strategy.trade_actions,
-      network,
-      executionSupport: getStrategyExecutionSupport(strategy, network),
+      executionSupport: getStrategyExecutionSupport(strategy),
     })
 
     setIsExecuting(strategyId)
@@ -217,7 +213,6 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
         strategy,
         wallet.address,
         wallet.signAndSubmit,
-        network,
       )
       // Show success modal instead of toast
       setSuccessStrategy(strategy)
@@ -397,7 +392,6 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
                     isExecuting={isExecuting}
                     onExecute={handleExecute}
                     canSign={canSign}
-                    network={wallet.network ?? 'devnet'}
                   />
                 ))}
               </div>
@@ -437,16 +431,14 @@ function StrategyCard({
   isExecuting,
   onExecute,
   canSign,
-  network,
 }: {
   strategy: Strategy
   isExecuting: string | null
   onExecute: (id: string) => void
   canSign: boolean
-  network: import('@/lib/wallet-providers').XrplNetwork
 }) {
   const { label, cls } = riskBadge(strategy.risk_score)
-  const executionSupport = getStrategyExecutionSupport(strategy, network)
+  const executionSupport = getStrategyExecutionSupport(strategy)
   const executeDisabledReason =
     isExecuting !== null
       ? 'Another strategy is already executing'

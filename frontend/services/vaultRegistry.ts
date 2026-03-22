@@ -7,8 +7,9 @@
  */
 
 import { Client } from 'xrpl'
-import { getXrplWsUrl } from '@/lib/wallet-providers'
 import type { PoolAsset } from '@/services/poolRegistry'
+
+const LENDING_DEVNET_WS = 'wss://s.devnet.rippletest.net:51233/'
 
 export interface VaultEntry {
   /** 64-hex VaultID used in VaultDeposit / LoanSet transactions */
@@ -179,7 +180,7 @@ export function isVaultSupportedForExecution(assetCode: string | null | undefine
 
 export async function resolveVaultByAsset(
   assetCode: string,
-  wsUrl: string = getXrplWsUrl(),
+  wsUrl: string = LENDING_DEVNET_WS,
 ): Promise<VaultEntry> {
   const key = normalizeVaultKey(assetCode)
   const cached = validatedVaults.get(key)
