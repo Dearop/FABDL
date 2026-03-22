@@ -4,7 +4,7 @@ import sdk from '@crossmarkio/sdk'
 
 // --------------- Constants ---------------
 
-const LENDING_DEVNET_WS = 'wss://lend.devnet.rippletest.net:51233/'
+const LENDING_DEVNET_WS = 'wss://s.devnet.rippletest.net:51233/'
 const STORAGE_KEY = 'xrpl_wallet'
 
 // --------------- Shared Types ---------------
