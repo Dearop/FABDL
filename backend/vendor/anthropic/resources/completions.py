@@ -9,8 +9,13 @@ import httpx
 
 from .. import _legacy_response
 from ..types import completion_create_params
-from .._types import Body, Omit, Query, Headers, NotGiven, SequenceNotStr, omit, not_given
-from .._utils import is_given, required_args, maybe_transform, strip_not_given, async_maybe_transform
+from .._types import NOT_GIVEN, Body, Query, Headers, NotGiven
+from .._utils import (
+    is_given,
+    required_args,
+    maybe_transform,
+    async_maybe_transform,
+)
 from .._compat import cached_property
 from .._resource import SyncAPIResource, AsyncAPIResource
 from .._response import to_streamed_response_wrapper, async_to_streamed_response_wrapper
@@ -20,7 +25,6 @@ from .._base_client import make_request_options
 from ..types.completion import Completion
 from ..types.model_param import ModelParam
 from ..types.metadata_param import MetadataParam
-from ..types.anthropic_beta_param import AnthropicBetaParam
 
 __all__ = ["Completions", "AsyncCompletions"]
 
@@ -52,29 +56,28 @@ class Completions(SyncAPIResource):
         max_tokens_to_sample: int,
         model: ModelParam,
         prompt: str,
-        metadata: MetadataParam | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Completion:
         """[Legacy] Create a Text Completion.
 
         The Text Completions API is a legacy API.
 
         We recommend using the
-        [Messages API](https://docs.claude.com/en/api/messages) going forward.
+        [Messages API](https://docs.anthropic.com/en/api/messages) going forward.
 
         Future models and features will not be compatible with Text Completions. See our
-        [migration guide](https://docs.claude.com/en/api/migrating-from-text-completions-to-messages)
+        [migration guide](https://docs.anthropic.com/en/api/migrating-from-text-completions-to-messages)
         for guidance in migrating from Text Completions to Messages.
 
         Args:
@@ -96,9 +99,10 @@ class Completions(SyncAPIResource):
               "\n\nHuman: {userQuestion}\n\nAssistant:"
               ```
 
-              See [prompt validation](https://docs.claude.com/en/api/prompt-validation) and
-              our guide to [prompt design](https://docs.claude.com/en/docs/intro-to-prompting)
-              for more details.
+              See [prompt validation](https://docs.anthropic.com/en/api/prompt-validation) and
+              our guide to
+              [prompt design](https://docs.anthropic.com/en/docs/intro-to-prompting) for more
+              details.
 
           metadata: An object describing metadata about the request.
 
@@ -110,7 +114,7 @@ class Completions(SyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/streaming) for details.
 
           temperature: Amount of randomness injected into the response.
 
@@ -138,8 +142,6 @@ class Completions(SyncAPIResource):
 
               Recommended for advanced use cases only. You usually only need to use
               `temperature`.
-
-          betas: Optional header to specify the beta version(s) you want to use.
 
           extra_headers: Send extra headers
 
@@ -159,28 +161,27 @@ class Completions(SyncAPIResource):
         model: ModelParam,
         prompt: str,
         stream: Literal[True],
-        metadata: MetadataParam | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Stream[Completion]:
         """[Legacy] Create a Text Completion.
 
         The Text Completions API is a legacy API.
 
         We recommend using the
-        [Messages API](https://docs.claude.com/en/api/messages) going forward.
+        [Messages API](https://docs.anthropic.com/en/api/messages) going forward.
 
         Future models and features will not be compatible with Text Completions. See our
-        [migration guide](https://docs.claude.com/en/api/migrating-from-text-completions-to-messages)
+        [migration guide](https://docs.anthropic.com/en/api/migrating-from-text-completions-to-messages)
         for guidance in migrating from Text Completions to Messages.
 
         Args:
@@ -202,13 +203,14 @@ class Completions(SyncAPIResource):
               "\n\nHuman: {userQuestion}\n\nAssistant:"
               ```
 
-              See [prompt validation](https://docs.claude.com/en/api/prompt-validation) and
-              our guide to [prompt design](https://docs.claude.com/en/docs/intro-to-prompting)
-              for more details.
+              See [prompt validation](https://docs.anthropic.com/en/api/prompt-validation) and
+              our guide to
+              [prompt design](https://docs.anthropic.com/en/docs/intro-to-prompting) for more
+              details.
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/streaming) for details.
 
           metadata: An object describing metadata about the request.
 
@@ -244,8 +246,6 @@ class Completions(SyncAPIResource):
 
               Recommended for advanced use cases only. You usually only need to use
               `temperature`.
-
-          betas: Optional header to specify the beta version(s) you want to use.
 
           extra_headers: Send extra headers
 
@@ -265,28 +265,27 @@ class Completions(SyncAPIResource):
         model: ModelParam,
         prompt: str,
         stream: bool,
-        metadata: MetadataParam | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Completion | Stream[Completion]:
         """[Legacy] Create a Text Completion.
 
         The Text Completions API is a legacy API.
 
         We recommend using the
-        [Messages API](https://docs.claude.com/en/api/messages) going forward.
+        [Messages API](https://docs.anthropic.com/en/api/messages) going forward.
 
         Future models and features will not be compatible with Text Completions. See our
-        [migration guide](https://docs.claude.com/en/api/migrating-from-text-completions-to-messages)
+        [migration guide](https://docs.anthropic.com/en/api/migrating-from-text-completions-to-messages)
         for guidance in migrating from Text Completions to Messages.
 
         Args:
@@ -308,13 +307,14 @@ class Completions(SyncAPIResource):
               "\n\nHuman: {userQuestion}\n\nAssistant:"
               ```
 
-              See [prompt validation](https://docs.claude.com/en/api/prompt-validation) and
-              our guide to [prompt design](https://docs.claude.com/en/docs/intro-to-prompting)
-              for more details.
+              See [prompt validation](https://docs.anthropic.com/en/api/prompt-validation) and
+              our guide to
+              [prompt design](https://docs.anthropic.com/en/docs/intro-to-prompting) for more
+              details.
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/streaming) for details.
 
           metadata: An object describing metadata about the request.
 
@@ -351,8 +351,6 @@ class Completions(SyncAPIResource):
               Recommended for advanced use cases only. You usually only need to use
               `temperature`.
 
-          betas: Optional header to specify the beta version(s) you want to use.
-
           extra_headers: Send extra headers
 
           extra_query: Add additional query parameters to the request
@@ -370,26 +368,21 @@ class Completions(SyncAPIResource):
         max_tokens_to_sample: int,
         model: ModelParam,
         prompt: str,
-        metadata: MetadataParam | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | Literal[True] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Completion | Stream[Completion]:
         if not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
             timeout = 600
-        extra_headers = {
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else not_given}),
-            **(extra_headers or {}),
-        }
         return self._post(
             "/v1/complete",
             body=maybe_transform(
@@ -404,9 +397,7 @@ class Completions(SyncAPIResource):
                     "top_k": top_k,
                     "top_p": top_p,
                 },
-                completion_create_params.CompletionCreateParamsStreaming
-                if stream
-                else completion_create_params.CompletionCreateParamsNonStreaming,
+                completion_create_params.CompletionCreateParams,
             ),
             options=make_request_options(
                 extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
@@ -444,29 +435,28 @@ class AsyncCompletions(AsyncAPIResource):
         max_tokens_to_sample: int,
         model: ModelParam,
         prompt: str,
-        metadata: MetadataParam | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Completion:
         """[Legacy] Create a Text Completion.
 
         The Text Completions API is a legacy API.
 
         We recommend using the
-        [Messages API](https://docs.claude.com/en/api/messages) going forward.
+        [Messages API](https://docs.anthropic.com/en/api/messages) going forward.
 
         Future models and features will not be compatible with Text Completions. See our
-        [migration guide](https://docs.claude.com/en/api/migrating-from-text-completions-to-messages)
+        [migration guide](https://docs.anthropic.com/en/api/migrating-from-text-completions-to-messages)
         for guidance in migrating from Text Completions to Messages.
 
         Args:
@@ -488,9 +478,10 @@ class AsyncCompletions(AsyncAPIResource):
               "\n\nHuman: {userQuestion}\n\nAssistant:"
               ```
 
-              See [prompt validation](https://docs.claude.com/en/api/prompt-validation) and
-              our guide to [prompt design](https://docs.claude.com/en/docs/intro-to-prompting)
-              for more details.
+              See [prompt validation](https://docs.anthropic.com/en/api/prompt-validation) and
+              our guide to
+              [prompt design](https://docs.anthropic.com/en/docs/intro-to-prompting) for more
+              details.
 
           metadata: An object describing metadata about the request.
 
@@ -502,7 +493,7 @@ class AsyncCompletions(AsyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/streaming) for details.
 
           temperature: Amount of randomness injected into the response.
 
@@ -530,8 +521,6 @@ class AsyncCompletions(AsyncAPIResource):
 
               Recommended for advanced use cases only. You usually only need to use
               `temperature`.
-
-          betas: Optional header to specify the beta version(s) you want to use.
 
           extra_headers: Send extra headers
 
@@ -551,28 +540,27 @@ class AsyncCompletions(AsyncAPIResource):
         model: ModelParam,
         prompt: str,
         stream: Literal[True],
-        metadata: MetadataParam | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> AsyncStream[Completion]:
         """[Legacy] Create a Text Completion.
 
         The Text Completions API is a legacy API.
 
         We recommend using the
-        [Messages API](https://docs.claude.com/en/api/messages) going forward.
+        [Messages API](https://docs.anthropic.com/en/api/messages) going forward.
 
         Future models and features will not be compatible with Text Completions. See our
-        [migration guide](https://docs.claude.com/en/api/migrating-from-text-completions-to-messages)
+        [migration guide](https://docs.anthropic.com/en/api/migrating-from-text-completions-to-messages)
         for guidance in migrating from Text Completions to Messages.
 
         Args:
@@ -594,13 +582,14 @@ class AsyncCompletions(AsyncAPIResource):
               "\n\nHuman: {userQuestion}\n\nAssistant:"
               ```
 
-              See [prompt validation](https://docs.claude.com/en/api/prompt-validation) and
-              our guide to [prompt design](https://docs.claude.com/en/docs/intro-to-prompting)
-              for more details.
+              See [prompt validation](https://docs.anthropic.com/en/api/prompt-validation) and
+              our guide to
+              [prompt design](https://docs.anthropic.com/en/docs/intro-to-prompting) for more
+              details.
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/streaming) for details.
 
           metadata: An object describing metadata about the request.
 
@@ -636,8 +625,6 @@ class AsyncCompletions(AsyncAPIResource):
 
               Recommended for advanced use cases only. You usually only need to use
               `temperature`.
-
-          betas: Optional header to specify the beta version(s) you want to use.
 
           extra_headers: Send extra headers
 
@@ -657,28 +644,27 @@ class AsyncCompletions(AsyncAPIResource):
         model: ModelParam,
         prompt: str,
         stream: bool,
-        metadata: MetadataParam | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Completion | AsyncStream[Completion]:
         """[Legacy] Create a Text Completion.
 
         The Text Completions API is a legacy API.
 
         We recommend using the
-        [Messages API](https://docs.claude.com/en/api/messages) going forward.
+        [Messages API](https://docs.anthropic.com/en/api/messages) going forward.
 
         Future models and features will not be compatible with Text Completions. See our
-        [migration guide](https://docs.claude.com/en/api/migrating-from-text-completions-to-messages)
+        [migration guide](https://docs.anthropic.com/en/api/migrating-from-text-completions-to-messages)
         for guidance in migrating from Text Completions to Messages.
 
         Args:
@@ -700,13 +686,14 @@ class AsyncCompletions(AsyncAPIResource):
               "\n\nHuman: {userQuestion}\n\nAssistant:"
               ```
 
-              See [prompt validation](https://docs.claude.com/en/api/prompt-validation) and
-              our guide to [prompt design](https://docs.claude.com/en/docs/intro-to-prompting)
-              for more details.
+              See [prompt validation](https://docs.anthropic.com/en/api/prompt-validation) and
+              our guide to
+              [prompt design](https://docs.anthropic.com/en/docs/intro-to-prompting) for more
+              details.
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/streaming) for details.
 
           metadata: An object describing metadata about the request.
 
@@ -743,8 +730,6 @@ class AsyncCompletions(AsyncAPIResource):
               Recommended for advanced use cases only. You usually only need to use
               `temperature`.
 
-          betas: Optional header to specify the beta version(s) you want to use.
-
           extra_headers: Send extra headers
 
           extra_query: Add additional query parameters to the request
@@ -762,26 +747,21 @@ class AsyncCompletions(AsyncAPIResource):
         max_tokens_to_sample: int,
         model: ModelParam,
         prompt: str,
-        metadata: MetadataParam | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: MetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | Literal[True] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Completion | AsyncStream[Completion]:
         if not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
             timeout = 600
-        extra_headers = {
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else not_given}),
-            **(extra_headers or {}),
-        }
         return await self._post(
             "/v1/complete",
             body=await async_maybe_transform(
@@ -796,9 +776,7 @@ class AsyncCompletions(AsyncAPIResource):
                     "top_k": top_k,
                     "top_p": top_p,
                 },
-                completion_create_params.CompletionCreateParamsStreaming
-                if stream
-                else completion_create_params.CompletionCreateParamsNonStreaming,
+                completion_create_params.CompletionCreateParams,
             ),
             options=make_request_options(
                 extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout

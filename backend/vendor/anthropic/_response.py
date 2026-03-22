@@ -174,7 +174,6 @@ class BaseAPIResponse(Generic[R]):
                         ),
                         response=self.http_response,
                         client=cast(Any, self._client),
-                        options=self._options,
                     ),
                 )
 
@@ -185,7 +184,6 @@ class BaseAPIResponse(Generic[R]):
                         cast_to=extract_stream_chunk_type(self._stream_cls),
                         response=self.http_response,
                         client=cast(Any, self._client),
-                        options=self._options,
                     ),
                 )
 
@@ -199,7 +197,6 @@ class BaseAPIResponse(Generic[R]):
                     cast_to=cast_to,
                     response=self.http_response,
                     client=cast(Any, self._client),
-                    options=self._options,
                 ),
             )
 
@@ -264,7 +261,7 @@ class BaseAPIResponse(Generic[R]):
         # split is required to handle cases where additional information is included
         # in the response, e.g. application/json; charset=utf-8
         content_type, *_ = response.headers.get("content-type", "*").split(";")
-        if not content_type.endswith("json"):
+        if content_type != "application/json":
             if is_basemodel(cast_to):
                 try:
                     data = response.json()

@@ -2,22 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Union, Iterable, Optional
+from typing import List, Union, Iterable
 from typing_extensions import Literal, Required, TypeAlias, TypedDict
 
-from .._types import SequenceNotStr
 from .model_param import ModelParam
 from .message_param import MessageParam
 from .metadata_param import MetadataParam
 from .text_block_param import TextBlockParam
 from .tool_union_param import ToolUnionParam
 from .tool_choice_param import ToolChoiceParam
-from .output_config_param import OutputConfigParam
 from .thinking_config_param import ThinkingConfigParam
 from .tool_choice_any_param import ToolChoiceAnyParam
 from .tool_choice_auto_param import ToolChoiceAutoParam
 from .tool_choice_tool_param import ToolChoiceToolParam
-from .cache_control_ephemeral_param import CacheControlEphemeralParam
 
 __all__ = [
     "MessageCreateParamsBase",
@@ -39,7 +36,7 @@ class MessageCreateParamsBase(TypedDict, total=False):
     only specifies the absolute maximum number of tokens to generate.
 
     Different models have different maximum values for this parameter. See
-    [models](https://docs.claude.com/en/docs/models-overview) for details.
+    [models](https://docs.anthropic.com/en/docs/models-overview) for details.
     """
 
     messages: Required[Iterable[MessageParam]]
@@ -100,14 +97,35 @@ class MessageCreateParamsBase(TypedDict, total=False):
     { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
     ```
 
-    See [input examples](https://docs.claude.com/en/api/messages-examples).
+    Starting with Claude 3 models, you can also send image content blocks:
+
+    ```json
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": "/9j/4AAQSkZJRg..."
+          }
+        },
+        { "type": "text", "text": "What is in this image?" }
+      ]
+    }
+    ```
+
+    We currently support the `base64` source type for images, and the `image/jpeg`,
+    `image/png`, `image/gif`, and `image/webp` media types.
+
+    See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+    more input examples.
 
     Note that if you want to include a
-    [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-    top-level `system` parameter — there is no `"system"` role for input messages in
-    the Messages API.
-
-    There is a limit of 100,000 messages in a single request.
+    [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+    the top-level `system` parameter — there is no `"system"` role for input
+    messages in the Messages API.
     """
 
     model: Required[ModelParam]
@@ -117,37 +135,10 @@ class MessageCreateParamsBase(TypedDict, total=False):
     details and options.
     """
 
-    cache_control: Optional[CacheControlEphemeralParam]
-    """
-    Top-level cache control automatically applies a cache_control marker to the last
-    cacheable block in the request.
-    """
-
-    container: Optional[str]
-    """Container identifier for reuse across requests."""
-
-    inference_geo: Optional[str]
-    """Specifies the geographic region for inference processing.
-
-    If not specified, the workspace's `default_inference_geo` is used.
-    """
-
     metadata: MetadataParam
     """An object describing metadata about the request."""
 
-    output_config: OutputConfigParam
-    """Configuration options for the model's output, such as the output format."""
-
-    service_tier: Literal["auto", "standard_only"]
-    """
-    Determines whether to use priority capacity (if available) or standard capacity
-    for this request.
-
-    Anthropic offers different levels of service for your API requests. See
-    [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
-    """
-
-    stop_sequences: SequenceNotStr[str]
+    stop_sequences: List[str]
     """Custom text sequences that will cause the model to stop generating.
 
     Our models will normally stop when they have naturally completed their turn,
@@ -164,7 +155,7 @@ class MessageCreateParamsBase(TypedDict, total=False):
 
     A system prompt is a way of providing context and instructions to Claude, such
     as specifying a particular goal or role. See our
-    [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+    [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
     """
 
     temperature: float
@@ -186,7 +177,7 @@ class MessageCreateParamsBase(TypedDict, total=False):
     tokens and counts towards your `max_tokens` limit.
 
     See
-    [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+    [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
     for details.
     """
 
@@ -204,12 +195,6 @@ class MessageCreateParamsBase(TypedDict, total=False):
     content blocks that represent the model's use of those tools. You can then run
     those tools using the tool input generated by the model and then optionally
     return results back to the model using `tool_result` content blocks.
-
-    There are two types of tools: **client tools** and **server tools**. The
-    behavior described below applies to client tools. For
-    [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-    see their individual documentation as each has its own behavior (e.g., the
-    [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
     Each tool definition includes:
 
@@ -272,7 +257,7 @@ class MessageCreateParamsBase(TypedDict, total=False):
     functions, or more generally whenever you want the model to produce a particular
     JSON structure of output.
 
-    See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+    See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
     """
 
     top_k: int
@@ -318,7 +303,8 @@ class MessageCreateParamsNonStreaming(MessageCreateParamsBase, total=False):
     stream: Literal[False]
     """Whether to incrementally stream the response using server-sent events.
 
-    See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
+    See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+    details.
     """
 
 
@@ -326,7 +312,8 @@ class MessageCreateParamsStreaming(MessageCreateParamsBase):
     stream: Required[Literal[True]]
     """Whether to incrementally stream the response using server-sent events.
 
-    See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
+    See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+    details.
     """
 
 

@@ -17,8 +17,6 @@ class CitationCharLocation(BaseModel):
 
     end_char_index: int
 
-    file_id: Optional[str] = None
-
     start_char_index: int
 
     type: Literal["char_location"]

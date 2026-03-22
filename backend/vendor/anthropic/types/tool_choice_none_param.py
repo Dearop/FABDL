@@ -8,6 +8,4 @@ __all__ = ["ToolChoiceNoneParam"]
 
 
 class ToolChoiceNoneParam(TypedDict, total=False):
-    """The model will not be allowed to use tools."""
-
     type: Required[Literal["none"]]

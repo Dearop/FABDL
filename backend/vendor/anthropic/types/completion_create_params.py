@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 from typing import List, Union
-from typing_extensions import Literal, Required, Annotated, TypeAlias, TypedDict
+from typing_extensions import Literal, Required, TypeAlias, TypedDict
 
-from .._types import SequenceNotStr
-from .._utils import PropertyInfo
 from .model_param import ModelParam
 from .metadata_param import MetadataParam
-from .anthropic_beta_param import AnthropicBetaParam
 
 __all__ = [
     "CompletionRequestStreamingMetadata",
@@ -48,15 +45,16 @@ class CompletionCreateParamsBase(TypedDict, total=False):
     "\n\nHuman: {userQuestion}\n\nAssistant:"
     ```
 
-    See [prompt validation](https://docs.claude.com/en/api/prompt-validation) and
-    our guide to [prompt design](https://docs.claude.com/en/docs/intro-to-prompting)
-    for more details.
+    See [prompt validation](https://docs.anthropic.com/en/api/prompt-validation) and
+    our guide to
+    [prompt design](https://docs.anthropic.com/en/docs/intro-to-prompting) for more
+    details.
     """
 
     metadata: MetadataParam
     """An object describing metadata about the request."""
 
-    stop_sequences: SequenceNotStr[str]
+    stop_sequences: List[str]
     """Sequences that will cause the model to stop generating.
 
     Our models stop on `"\n\nHuman:"`, and may include additional built-in stop
@@ -97,9 +95,6 @@ class CompletionCreateParamsBase(TypedDict, total=False):
     `temperature`.
     """
 
-    betas: Annotated[List[AnthropicBetaParam], PropertyInfo(alias="anthropic-beta")]
-    """Optional header to specify the beta version(s) you want to use."""
-
 
 Metadata: TypeAlias = MetadataParam
 """This is deprecated, `MetadataParam` should be used instead"""
@@ -109,7 +104,7 @@ class CompletionCreateParamsNonStreaming(CompletionCreateParamsBase, total=False
     stream: Literal[False]
     """Whether to incrementally stream the response using server-sent events.
 
-    See [streaming](https://docs.claude.com/en/api/streaming) for details.
+    See [streaming](https://docs.anthropic.com/en/api/streaming) for details.
     """
 
 
@@ -117,7 +112,7 @@ class CompletionCreateParamsStreaming(CompletionCreateParamsBase):
     stream: Required[Literal[True]]
     """Whether to incrementally stream the response using server-sent events.
 
-    See [streaming](https://docs.claude.com/en/api/streaming) for details.
+    See [streaming](https://docs.anthropic.com/en/api/streaming) for details.
     """
 
 

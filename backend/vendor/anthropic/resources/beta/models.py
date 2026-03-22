@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-from typing import List
-
 import httpx
 
 from ... import _legacy_response
-from ..._types import Body, Omit, Query, Headers, NotGiven, omit, not_given
-from ..._utils import is_given, maybe_transform, strip_not_given
+from ..._types import NOT_GIVEN, Body, Query, Headers, NotGiven
+from ..._utils import maybe_transform
 from ..._compat import cached_property
 from ..._resource import SyncAPIResource, AsyncAPIResource
 from ..._response import to_streamed_response_wrapper, async_to_streamed_response_wrapper
 from ...pagination import SyncPage, AsyncPage
 from ...types.beta import model_list_params
 from ..._base_client import AsyncPaginator, make_request_options
-from ...types.anthropic_beta_param import AnthropicBetaParam
 from ...types.beta.beta_model_info import BetaModelInfo
 
 __all__ = ["Models", "AsyncModels"]
@@ -45,13 +42,12 @@ class Models(SyncAPIResource):
         self,
         model_id: str,
         *,
-        betas: List[AnthropicBetaParam] | Omit = omit,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaModelInfo:
         """
         Get a specific model.
@@ -61,8 +57,6 @@ class Models(SyncAPIResource):
 
         Args:
           model_id: Model identifier or alias.
-
-          betas: Optional header to specify the beta version(s) you want to use.
 
           extra_headers: Send extra headers
 
@@ -74,10 +68,6 @@ class Models(SyncAPIResource):
         """
         if not model_id:
             raise ValueError(f"Expected a non-empty value for `model_id` but received {model_id!r}")
-        extra_headers = {
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else not_given}),
-            **(extra_headers or {}),
-        }
         return self._get(
             f"/v1/models/{model_id}?beta=true",
             options=make_request_options(
@@ -89,16 +79,15 @@ class Models(SyncAPIResource):
     def list(
         self,
         *,
-        after_id: str | Omit = omit,
-        before_id: str | Omit = omit,
-        limit: int | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        after_id: str | NotGiven = NOT_GIVEN,
+        before_id: str | NotGiven = NOT_GIVEN,
+        limit: int | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> SyncPage[BetaModelInfo]:
         """
         List available models.
@@ -117,8 +106,6 @@ class Models(SyncAPIResource):
 
               Defaults to `20`. Ranges from `1` to `1000`.
 
-          betas: Optional header to specify the beta version(s) you want to use.
-
           extra_headers: Send extra headers
 
           extra_query: Add additional query parameters to the request
@@ -127,10 +114,6 @@ class Models(SyncAPIResource):
 
           timeout: Override the client-level default timeout for this request, in seconds
         """
-        extra_headers = {
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else not_given}),
-            **(extra_headers or {}),
-        }
         return self._get_api_list(
             "/v1/models?beta=true",
             page=SyncPage[BetaModelInfo],
@@ -176,13 +159,12 @@ class AsyncModels(AsyncAPIResource):
         self,
         model_id: str,
         *,
-        betas: List[AnthropicBetaParam] | Omit = omit,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaModelInfo:
         """
         Get a specific model.
@@ -192,8 +174,6 @@ class AsyncModels(AsyncAPIResource):
 
         Args:
           model_id: Model identifier or alias.
-
-          betas: Optional header to specify the beta version(s) you want to use.
 
           extra_headers: Send extra headers
 
@@ -205,10 +185,6 @@ class AsyncModels(AsyncAPIResource):
         """
         if not model_id:
             raise ValueError(f"Expected a non-empty value for `model_id` but received {model_id!r}")
-        extra_headers = {
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else not_given}),
-            **(extra_headers or {}),
-        }
         return await self._get(
             f"/v1/models/{model_id}?beta=true",
             options=make_request_options(
@@ -220,16 +196,15 @@ class AsyncModels(AsyncAPIResource):
     def list(
         self,
         *,
-        after_id: str | Omit = omit,
-        before_id: str | Omit = omit,
-        limit: int | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        after_id: str | NotGiven = NOT_GIVEN,
+        before_id: str | NotGiven = NOT_GIVEN,
+        limit: int | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> AsyncPaginator[BetaModelInfo, AsyncPage[BetaModelInfo]]:
         """
         List available models.
@@ -248,8 +223,6 @@ class AsyncModels(AsyncAPIResource):
 
               Defaults to `20`. Ranges from `1` to `1000`.
 
-          betas: Optional header to specify the beta version(s) you want to use.
-
           extra_headers: Send extra headers
 
           extra_query: Add additional query parameters to the request
@@ -258,10 +231,6 @@ class AsyncModels(AsyncAPIResource):
 
           timeout: Override the client-level default timeout for this request, in seconds
         """
-        extra_headers = {
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else not_given}),
-            **(extra_headers or {}),
-        }
         return self._get_api_list(
             "/v1/models?beta=true",
             page=AsyncPage[BetaModelInfo],

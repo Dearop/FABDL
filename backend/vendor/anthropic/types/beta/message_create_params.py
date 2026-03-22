@@ -2,34 +2,20 @@
 
 from __future__ import annotations
 
-from typing import List, Union, Generic, Iterable, Optional
-from typing_extensions import Literal, Required, Annotated, TypeAlias, TypedDict
+from typing import List, Union, Iterable
+from typing_extensions import Literal, Required, Annotated, TypedDict
 
-from ..._types import SequenceNotStr
 from ..._utils import PropertyInfo
 from ..model_param import ModelParam
 from .beta_message_param import BetaMessageParam
 from .beta_metadata_param import BetaMetadataParam
-from .parsed_beta_message import ResponseFormatT
 from ..anthropic_beta_param import AnthropicBetaParam
-from .beta_container_params import BetaContainerParams
 from .beta_text_block_param import BetaTextBlockParam
 from .beta_tool_union_param import BetaToolUnionParam
 from .beta_tool_choice_param import BetaToolChoiceParam
-from .beta_output_config_param import BetaOutputConfigParam
 from .beta_thinking_config_param import BetaThinkingConfigParam
-from .beta_json_output_format_param import BetaJSONOutputFormatParam
-from .beta_cache_control_ephemeral_param import BetaCacheControlEphemeralParam
-from .beta_context_management_config_param import BetaContextManagementConfigParam
-from .beta_request_mcp_server_url_definition_param import BetaRequestMCPServerURLDefinitionParam
 
-__all__ = [
-    "MessageCreateParamsBase",
-    "Container",
-    "MessageCreateParamsNonStreaming",
-    "MessageCreateParamsStreaming",
-    "OutputFormat",
-]
+__all__ = ["MessageCreateParamsBase", "MessageCreateParamsNonStreaming", "MessageCreateParamsStreaming"]
 
 
 class MessageCreateParamsBase(TypedDict, total=False):
@@ -40,7 +26,7 @@ class MessageCreateParamsBase(TypedDict, total=False):
     only specifies the absolute maximum number of tokens to generate.
 
     Different models have different maximum values for this parameter. See
-    [models](https://docs.claude.com/en/docs/models-overview) for details.
+    [models](https://docs.anthropic.com/en/docs/models-overview) for details.
     """
 
     messages: Required[Iterable[BetaMessageParam]]
@@ -101,14 +87,35 @@ class MessageCreateParamsBase(TypedDict, total=False):
     { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
     ```
 
-    See [input examples](https://docs.claude.com/en/api/messages-examples).
+    Starting with Claude 3 models, you can also send image content blocks:
+
+    ```json
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "image",
+          "source": {
+            "type": "base64",
+            "media_type": "image/jpeg",
+            "data": "/9j/4AAQSkZJRg..."
+          }
+        },
+        { "type": "text", "text": "What is in this image?" }
+      ]
+    }
+    ```
+
+    We currently support the `base64` source type for images, and the `image/jpeg`,
+    `image/png`, `image/gif`, and `image/webp` media types.
+
+    See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+    more input examples.
 
     Note that if you want to include a
-    [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-    top-level `system` parameter — there is no `"system"` role for input messages in
-    the Messages API.
-
-    There is a limit of 100,000 messages in a single request.
+    [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+    the top-level `system` parameter — there is no `"system"` role for input
+    messages in the Messages API.
     """
 
     model: Required[ModelParam]
@@ -118,63 +125,10 @@ class MessageCreateParamsBase(TypedDict, total=False):
     details and options.
     """
 
-    cache_control: Optional[BetaCacheControlEphemeralParam]
-    """
-    Top-level cache control automatically applies a cache_control marker to the last
-    cacheable block in the request.
-    """
-
-    container: Optional[Container]
-    """Container identifier for reuse across requests."""
-
-    context_management: Optional[BetaContextManagementConfigParam]
-    """Context management configuration.
-
-    This allows you to control how Claude manages context across multiple requests,
-    such as whether to clear function results or not.
-    """
-
-    inference_geo: Optional[str]
-    """Specifies the geographic region for inference processing.
-
-    If not specified, the workspace's `default_inference_geo` is used.
-    """
-
-    mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam]
-    """MCP servers to be utilized in this request"""
-
     metadata: BetaMetadataParam
     """An object describing metadata about the request."""
 
-    output_config: BetaOutputConfigParam
-    """Configuration options for the model's output, such as the output format."""
-
-    output_format: Optional[BetaJSONOutputFormatParam]
-    """Deprecated: Use `output_config.format` instead.
-
-    See
-    [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-    A schema to specify Claude's output format in responses. This parameter will be
-    removed in a future release.
-    """
-
-    service_tier: Literal["auto", "standard_only"]
-    """
-    Determines whether to use priority capacity (if available) or standard capacity
-    for this request.
-
-    Anthropic offers different levels of service for your API requests. See
-    [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
-    """
-
-    speed: Optional[Literal["standard", "fast"]]
-    """The inference speed mode for this request.
-
-    `"fast"` enables high output-tokens-per-second inference.
-    """
-
-    stop_sequences: SequenceNotStr[str]
+    stop_sequences: List[str]
     """Custom text sequences that will cause the model to stop generating.
 
     Our models will normally stop when they have naturally completed their turn,
@@ -191,7 +145,7 @@ class MessageCreateParamsBase(TypedDict, total=False):
 
     A system prompt is a way of providing context and instructions to Claude, such
     as specifying a particular goal or role. See our
-    [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+    [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
     """
 
     temperature: float
@@ -213,7 +167,7 @@ class MessageCreateParamsBase(TypedDict, total=False):
     tokens and counts towards your `max_tokens` limit.
 
     See
-    [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+    [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
     for details.
     """
 
@@ -231,12 +185,6 @@ class MessageCreateParamsBase(TypedDict, total=False):
     content blocks that represent the model's use of those tools. You can then run
     those tools using the tool input generated by the model and then optionally
     return results back to the model using `tool_result` content blocks.
-
-    There are two types of tools: **client tools** and **server tools**. The
-    behavior described below applies to client tools. For
-    [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-    see their individual documentation as each has its own behavior (e.g., the
-    [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
     Each tool definition includes:
 
@@ -299,7 +247,7 @@ class MessageCreateParamsBase(TypedDict, total=False):
     functions, or more generally whenever you want the model to produce a particular
     JSON structure of output.
 
-    See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+    See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
     """
 
     top_k: int
@@ -328,25 +276,12 @@ class MessageCreateParamsBase(TypedDict, total=False):
     """Optional header to specify the beta version(s) you want to use."""
 
 
-Container: TypeAlias = Union[BetaContainerParams, str]
-
-
-class ParseMessageCreateParamsBase(MessageCreateParamsBase, Generic[ResponseFormatT]):
-    output_format: type[ResponseFormatT]  # type: ignore[misc]
-
-
-class OutputFormat(TypedDict, total=False):
-    schema: Required[object]
-    """The JSON schema of the format"""
-
-    type: Required[Literal["json_schema"]]
-
-
 class MessageCreateParamsNonStreaming(MessageCreateParamsBase, total=False):
     stream: Literal[False]
     """Whether to incrementally stream the response using server-sent events.
 
-    See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
+    See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+    details.
     """
 
 
@@ -354,7 +289,8 @@ class MessageCreateParamsStreaming(MessageCreateParamsBase):
     stream: Required[Literal[True]]
     """Whether to incrementally stream the response using server-sent events.
 
-    See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
+    See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+    details.
     """
 
 

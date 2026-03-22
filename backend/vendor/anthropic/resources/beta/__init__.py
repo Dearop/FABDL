@@ -8,14 +8,6 @@ from .beta import (
     BetaWithStreamingResponse,
     AsyncBetaWithStreamingResponse,
 )
-from .files import (
-    Files,
-    AsyncFiles,
-    FilesWithRawResponse,
-    AsyncFilesWithRawResponse,
-    FilesWithStreamingResponse,
-    AsyncFilesWithStreamingResponse,
-)
 from .models import (
     Models,
     AsyncModels,
@@ -23,14 +15,6 @@ from .models import (
     AsyncModelsWithRawResponse,
     ModelsWithStreamingResponse,
     AsyncModelsWithStreamingResponse,
-)
-from .skills import (
-    Skills,
-    AsyncSkills,
-    SkillsWithRawResponse,
-    AsyncSkillsWithRawResponse,
-    SkillsWithStreamingResponse,
-    AsyncSkillsWithStreamingResponse,
 )
 from .messages import (
     Messages,
@@ -54,18 +38,6 @@ __all__ = [
     "AsyncMessagesWithRawResponse",
     "MessagesWithStreamingResponse",
     "AsyncMessagesWithStreamingResponse",
-    "Files",
-    "AsyncFiles",
-    "FilesWithRawResponse",
-    "AsyncFilesWithRawResponse",
-    "FilesWithStreamingResponse",
-    "AsyncFilesWithStreamingResponse",
-    "Skills",
-    "AsyncSkills",
-    "SkillsWithRawResponse",
-    "AsyncSkillsWithRawResponse",
-    "SkillsWithStreamingResponse",
-    "AsyncSkillsWithStreamingResponse",
     "Beta",
     "AsyncBeta",
     "BetaWithRawResponse",

@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Type, Generic, Callable, cast
+from typing import TYPE_CHECKING, Any, Type, Callable, cast
 from typing_extensions import Self, Iterator, Awaitable, AsyncIterator, assert_never
 
 import httpx
 from pydantic import BaseModel
-
-from anthropic.types.tool_use_block import ToolUseBlock
-from anthropic.types.server_tool_use_block import ServerToolUseBlock
 
 from ._types import (
     TextEvent,
@@ -16,21 +13,17 @@ from ._types import (
     ThinkingEvent,
     InputJsonEvent,
     SignatureEvent,
-    ParsedMessageStopEvent,
-    ParsedMessageStreamEvent,
-    ParsedContentBlockStopEvent,
+    MessageStopEvent,
+    MessageStreamEvent,
+    ContentBlockStopEvent,
 )
-from ...types import RawMessageStreamEvent
-from ..._types import NOT_GIVEN, NotGiven
+from ...types import Message, ContentBlock, RawMessageStreamEvent
 from ..._utils import consume_sync_iterator, consume_async_iterator
 from ..._models import build, construct_type, construct_type_unchecked
 from ..._streaming import Stream, AsyncStream
-from ..._utils._utils import is_given
-from .._parse._response import ResponseFormatT, parse_text
-from ...types.parsed_message import ParsedMessage, ParsedContentBlock
 
 
-class MessageStream(Generic[ResponseFormatT]):
+class MessageStream:
     text_stream: Iterator[str]
     """Iterator over just the text deltas in the stream.
 
@@ -41,16 +34,11 @@ class MessageStream(Generic[ResponseFormatT]):
     ```
     """
 
-    def __init__(
-        self,
-        raw_stream: Stream[RawMessageStreamEvent],
-        output_format: ResponseFormatT | NotGiven,
-    ) -> None:
+    def __init__(self, raw_stream: Stream[RawMessageStreamEvent]) -> None:
         self._raw_stream = raw_stream
         self.text_stream = self.__stream_text__()
         self._iterator = self.__stream__()
-        self.__final_message_snapshot: ParsedMessage[ResponseFormatT] | None = None
-        self.__output_format = output_format
+        self.__final_message_snapshot: Message | None = None
 
     @property
     def response(self) -> httpx.Response:
@@ -60,10 +48,10 @@ class MessageStream(Generic[ResponseFormatT]):
     def request_id(self) -> str | None:
         return self.response.headers.get("request-id")  # type: ignore[no-any-return]
 
-    def __next__(self) -> ParsedMessageStreamEvent[ResponseFormatT]:
+    def __next__(self) -> MessageStreamEvent:
         return self._iterator.__next__()
 
-    def __iter__(self) -> Iterator[ParsedMessageStreamEvent[ResponseFormatT]]:
+    def __iter__(self) -> Iterator[MessageStreamEvent]:
         for item in self._iterator:
             yield item
 
@@ -86,7 +74,7 @@ class MessageStream(Generic[ResponseFormatT]):
         """
         self._raw_stream.close()
 
-    def get_final_message(self) -> ParsedMessage[ResponseFormatT]:
+    def get_final_message(self) -> Message:
         """Waits until the stream has been read to completion and returns
         the accumulated `Message` object.
         """
@@ -109,9 +97,7 @@ class MessageStream(Generic[ResponseFormatT]):
                 text_blocks.append(block.text)
 
         if not text_blocks:
-            raise RuntimeError(
-                f".get_final_text() can only be called when the API returns a `text` content block.\nThe API returned {','.join([b.type for b in message.content])} content block type(s) that you can access by calling get_final_message().content"
-            )
+            raise RuntimeError("Expected to have received at least 1 text block")
 
         return "".join(text_blocks)
 
@@ -121,16 +107,15 @@ class MessageStream(Generic[ResponseFormatT]):
 
     # properties
     @property
-    def current_message_snapshot(self) -> ParsedMessage[ResponseFormatT]:
+    def current_message_snapshot(self) -> Message:
         assert self.__final_message_snapshot is not None
         return self.__final_message_snapshot
 
-    def __stream__(self) -> Iterator[ParsedMessageStreamEvent[ResponseFormatT]]:
+    def __stream__(self) -> Iterator[MessageStreamEvent]:
         for sse_event in self._raw_stream:
             self.__final_message_snapshot = accumulate_event(
                 event=sse_event,
                 current_snapshot=self.__final_message_snapshot,
-                output_format=self.__output_format,
             )
 
             events_to_fire = build_events(event=sse_event, message_snapshot=self.current_message_snapshot)
@@ -143,7 +128,7 @@ class MessageStream(Generic[ResponseFormatT]):
                 yield chunk.delta.text
 
 
-class MessageStreamManager(Generic[ResponseFormatT]):
+class MessageStreamManager:
     """Wrapper over MessageStream that is returned by `.stream()`.
 
     ```py
@@ -156,16 +141,13 @@ class MessageStreamManager(Generic[ResponseFormatT]):
     def __init__(
         self,
         api_request: Callable[[], Stream[RawMessageStreamEvent]],
-        *,
-        output_format: ResponseFormatT | NotGiven,
     ) -> None:
-        self.__stream: MessageStream[ResponseFormatT] | None = None
+        self.__stream: MessageStream | None = None
         self.__api_request = api_request
-        self.__output_format = output_format
 
-    def __enter__(self) -> MessageStream[ResponseFormatT]:
+    def __enter__(self) -> MessageStream:
         raw_stream = self.__api_request()
-        self.__stream = MessageStream(raw_stream, output_format=self.__output_format)
+        self.__stream = MessageStream(raw_stream)
         return self.__stream
 
     def __exit__(
@@ -178,7 +160,7 @@ class MessageStreamManager(Generic[ResponseFormatT]):
             self.__stream.close()
 
 
-class AsyncMessageStream(Generic[ResponseFormatT]):
+class AsyncMessageStream:
     text_stream: AsyncIterator[str]
     """Async iterator over just the text deltas in the stream.
 
@@ -189,16 +171,11 @@ class AsyncMessageStream(Generic[ResponseFormatT]):
     ```
     """
 
-    def __init__(
-        self,
-        raw_stream: AsyncStream[RawMessageStreamEvent],
-        output_format: ResponseFormatT | NotGiven,
-    ) -> None:
+    def __init__(self, raw_stream: AsyncStream[RawMessageStreamEvent]) -> None:
         self._raw_stream = raw_stream
         self.text_stream = self.__stream_text__()
         self._iterator = self.__stream__()
-        self.__final_message_snapshot: ParsedMessage[ResponseFormatT] | None = None
-        self.__output_format = output_format
+        self.__final_message_snapshot: Message | None = None
 
     @property
     def response(self) -> httpx.Response:
@@ -208,10 +185,10 @@ class AsyncMessageStream(Generic[ResponseFormatT]):
     def request_id(self) -> str | None:
         return self.response.headers.get("request-id")  # type: ignore[no-any-return]
 
-    async def __anext__(self) -> ParsedMessageStreamEvent[ResponseFormatT]:
+    async def __anext__(self) -> MessageStreamEvent:
         return await self._iterator.__anext__()
 
-    async def __aiter__(self) -> AsyncIterator[ParsedMessageStreamEvent[ResponseFormatT]]:
+    async def __aiter__(self) -> AsyncIterator[MessageStreamEvent]:
         async for item in self._iterator:
             yield item
 
@@ -234,7 +211,7 @@ class AsyncMessageStream(Generic[ResponseFormatT]):
         """
         await self._raw_stream.close()
 
-    async def get_final_message(self) -> ParsedMessage[ResponseFormatT]:
+    async def get_final_message(self) -> Message:
         """Waits until the stream has been read to completion and returns
         the accumulated `Message` object.
         """
@@ -257,9 +234,7 @@ class AsyncMessageStream(Generic[ResponseFormatT]):
                 text_blocks.append(block.text)
 
         if not text_blocks:
-            raise RuntimeError(
-                f".get_final_text() can only be called when the API returns a `text` content block.\nThe API returned {','.join([b.type for b in message.content])} content block type(s) that you can access by calling get_final_message().content"
-            )
+            raise RuntimeError("Expected to have received at least 1 text block")
 
         return "".join(text_blocks)
 
@@ -269,16 +244,15 @@ class AsyncMessageStream(Generic[ResponseFormatT]):
 
     # properties
     @property
-    def current_message_snapshot(self) -> ParsedMessage[ResponseFormatT]:
+    def current_message_snapshot(self) -> Message:
         assert self.__final_message_snapshot is not None
         return self.__final_message_snapshot
 
-    async def __stream__(self) -> AsyncIterator[ParsedMessageStreamEvent[ResponseFormatT]]:
+    async def __stream__(self) -> AsyncIterator[MessageStreamEvent]:
         async for sse_event in self._raw_stream:
             self.__final_message_snapshot = accumulate_event(
                 event=sse_event,
                 current_snapshot=self.__final_message_snapshot,
-                output_format=self.__output_format,
             )
 
             events_to_fire = build_events(event=sse_event, message_snapshot=self.current_message_snapshot)
@@ -291,7 +265,7 @@ class AsyncMessageStream(Generic[ResponseFormatT]):
                 yield chunk.delta.text
 
 
-class AsyncMessageStreamManager(Generic[ResponseFormatT]):
+class AsyncMessageStreamManager:
     """Wrapper over AsyncMessageStream that is returned by `.stream()`
     so that an async context manager can be used without `await`ing the
     original client call.
@@ -306,16 +280,13 @@ class AsyncMessageStreamManager(Generic[ResponseFormatT]):
     def __init__(
         self,
         api_request: Awaitable[AsyncStream[RawMessageStreamEvent]],
-        *,
-        output_format: ResponseFormatT | NotGiven = NOT_GIVEN,
     ) -> None:
-        self.__stream: AsyncMessageStream[ResponseFormatT] | None = None
+        self.__stream: AsyncMessageStream | None = None
         self.__api_request = api_request
-        self.__output_format = output_format
 
-    async def __aenter__(self) -> AsyncMessageStream[ResponseFormatT]:
+    async def __aenter__(self) -> AsyncMessageStream:
         raw_stream = await self.__api_request
-        self.__stream = AsyncMessageStream(raw_stream, output_format=self.__output_format)
+        self.__stream = AsyncMessageStream(raw_stream)
         return self.__stream
 
     async def __aexit__(
@@ -331,18 +302,16 @@ class AsyncMessageStreamManager(Generic[ResponseFormatT]):
 def build_events(
     *,
     event: RawMessageStreamEvent,
-    message_snapshot: ParsedMessage[ResponseFormatT],
-) -> list[ParsedMessageStreamEvent[ResponseFormatT]]:
-    events_to_fire: list[ParsedMessageStreamEvent[ResponseFormatT]] = []
+    message_snapshot: Message,
+) -> list[MessageStreamEvent]:
+    events_to_fire: list[MessageStreamEvent] = []
 
     if event.type == "message_start":
         events_to_fire.append(event)
     elif event.type == "message_delta":
         events_to_fire.append(event)
     elif event.type == "message_stop":
-        events_to_fire.append(
-            build(ParsedMessageStopEvent[ResponseFormatT], type="message_stop", message=message_snapshot)
-        )
+        events_to_fire.append(build(MessageStopEvent, type="message_stop", message=message_snapshot))
     elif event.type == "content_block_start":
         events_to_fire.append(event)
     elif event.type == "content_block_delta":
@@ -406,14 +375,9 @@ def build_events(
     elif event.type == "content_block_stop":
         content_block = message_snapshot.content[event.index]
 
-        event_to_fire = build(
-            ParsedContentBlockStopEvent,
-            type="content_block_stop",
-            index=event.index,
-            content_block=content_block,
+        events_to_fire.append(
+            build(ContentBlockStopEvent, type="content_block_stop", index=event.index, content_block=content_block),
         )
-
-        events_to_fire.append(event_to_fire)
     else:
         # we only want exhaustive checking for linters, not at runtime
         if TYPE_CHECKING:  # type: ignore[unreachable]
@@ -424,18 +388,12 @@ def build_events(
 
 JSON_BUF_PROPERTY = "__json_buf"
 
-TRACKS_TOOL_INPUT = (
-    ToolUseBlock,
-    ServerToolUseBlock,
-)
-
 
 def accumulate_event(
     *,
     event: RawMessageStreamEvent,
-    current_snapshot: ParsedMessage[ResponseFormatT] | None,
-    output_format: ResponseFormatT | NotGiven = NOT_GIVEN,
-) -> ParsedMessage[ResponseFormatT]:
+    current_snapshot: Message | None,
+) -> Message:
     if not isinstance(cast(Any, event), BaseModel):
         event = cast(  # pyright: ignore[reportUnnecessaryCast]
             RawMessageStreamEvent,
@@ -449,7 +407,7 @@ def accumulate_event(
 
     if current_snapshot is None:
         if event.type == "message_start":
-            return cast(ParsedMessage[ResponseFormatT], ParsedMessage.construct(**cast(Any, event.message.to_dict())))
+            return Message.construct(**cast(Any, event.message.to_dict()))
 
         raise RuntimeError(f'Unexpected event order, got {event.type} before "message_start"')
 
@@ -457,8 +415,8 @@ def accumulate_event(
         # TODO: check index
         current_snapshot.content.append(
             cast(
-                Any,  # Pydantic does not support generic unions at runtime
-                construct_type(type_=ParsedContentBlock, value=event.content_block.model_dump()),
+                ContentBlock,
+                construct_type(type_=ContentBlock, value=event.content_block.model_dump()),
             ),
         )
     elif event.type == "content_block_delta":
@@ -467,7 +425,7 @@ def accumulate_event(
             if content.type == "text":
                 content.text += event.delta.text
         elif event.delta.type == "input_json_delta":
-            if isinstance(content, TRACKS_TOOL_INPUT):
+            if content.type == "tool_use":
                 from jiter import from_json
 
                 # we need to keep track of the raw JSON string as well so that we can
@@ -496,23 +454,9 @@ def accumulate_event(
             # we only want exhaustive checking for linters, not at runtime
             if TYPE_CHECKING:  # type: ignore[unreachable]
                 assert_never(event.delta)
-    elif event.type == "content_block_stop":
-        content_block = current_snapshot.content[event.index]
-        if content_block.type == "text" and is_given(output_format):
-            content_block.parsed_output = parse_text(content_block.text, output_format)
     elif event.type == "message_delta":
         current_snapshot.stop_reason = event.delta.stop_reason
         current_snapshot.stop_sequence = event.delta.stop_sequence
         current_snapshot.usage.output_tokens = event.usage.output_tokens
-
-        # Update other usage fields if they exist in the event
-        if event.usage.input_tokens is not None:
-            current_snapshot.usage.input_tokens = event.usage.input_tokens
-        if event.usage.cache_creation_input_tokens is not None:
-            current_snapshot.usage.cache_creation_input_tokens = event.usage.cache_creation_input_tokens
-        if event.usage.cache_read_input_tokens is not None:
-            current_snapshot.usage.cache_read_input_tokens = event.usage.cache_read_input_tokens
-        if event.usage.server_tool_use is not None:
-            current_snapshot.usage.server_tool_use = event.usage.server_tool_use
 
     return current_snapshot

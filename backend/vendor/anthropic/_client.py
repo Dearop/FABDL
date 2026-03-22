@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Mapping
+from typing import Any, Union, Mapping
 from typing_extensions import Self, override
 
 import httpx
@@ -11,6 +11,7 @@ import httpx
 from . import _constants, _exceptions
 from ._qs import Querystring
 from ._types import (
+    NOT_GIVEN,
     Omit,
     Headers,
     Timeout,
@@ -18,11 +19,13 @@ from ._types import (
     Transport,
     ProxiesTypes,
     RequestOptions,
-    not_given,
 )
-from ._utils import is_given, get_async_library
-from ._compat import cached_property
+from ._utils import (
+    is_given,
+    get_async_library,
+)
 from ._version import __version__
+from .resources import models, completions
 from ._streaming import Stream as Stream, AsyncStream as AsyncStream
 from ._exceptions import APIStatusError
 from ._base_client import (
@@ -30,13 +33,8 @@ from ._base_client import (
     SyncAPIClient,
     AsyncAPIClient,
 )
-
-if TYPE_CHECKING:
-    from .resources import beta, models, messages, completions
-    from .resources.models import Models, AsyncModels
-    from .resources.beta.beta import Beta, AsyncBeta
-    from .resources.completions import Completions, AsyncCompletions
-    from .resources.messages.messages import Messages, AsyncMessages
+from .resources.beta import beta
+from .resources.messages import messages
 
 __all__ = [
     "Timeout",
@@ -51,6 +49,13 @@ __all__ = [
 
 
 class Anthropic(SyncAPIClient):
+    completions: completions.Completions
+    messages: messages.Messages
+    models: models.Models
+    beta: beta.Beta
+    with_raw_response: AnthropicWithRawResponse
+    with_streaming_response: AnthropicWithStreamedResponse
+
     # client options
     api_key: str | None
     auth_token: str | None
@@ -65,7 +70,7 @@ class Anthropic(SyncAPIClient):
         api_key: str | None = None,
         auth_token: str | None = None,
         base_url: str | httpx.URL | None = None,
-        timeout: float | Timeout | None | NotGiven = not_given,
+        timeout: Union[float, Timeout, None, NotGiven] = NOT_GIVEN,
         max_retries: int = DEFAULT_MAX_RETRIES,
         default_headers: Mapping[str, str] | None = None,
         default_query: Mapping[str, object] | None = None,
@@ -115,37 +120,12 @@ class Anthropic(SyncAPIClient):
 
         self._default_stream_cls = Stream
 
-    @cached_property
-    def completions(self) -> Completions:
-        from .resources.completions import Completions
-
-        return Completions(self)
-
-    @cached_property
-    def messages(self) -> Messages:
-        from .resources.messages import Messages
-
-        return Messages(self)
-
-    @cached_property
-    def models(self) -> Models:
-        from .resources.models import Models
-
-        return Models(self)
-
-    @cached_property
-    def beta(self) -> Beta:
-        from .resources.beta import Beta
-
-        return Beta(self)
-
-    @cached_property
-    def with_raw_response(self) -> AnthropicWithRawResponse:
-        return AnthropicWithRawResponse(self)
-
-    @cached_property
-    def with_streaming_response(self) -> AnthropicWithStreamedResponse:
-        return AnthropicWithStreamedResponse(self)
+        self.completions = completions.Completions(self)
+        self.messages = messages.Messages(self)
+        self.models = models.Models(self)
+        self.beta = beta.Beta(self)
+        self.with_raw_response = AnthropicWithRawResponse(self)
+        self.with_streaming_response = AnthropicWithStreamedResponse(self)
 
     @property
     @override
@@ -155,7 +135,11 @@ class Anthropic(SyncAPIClient):
     @property
     @override
     def auth_headers(self) -> dict[str, str]:
-        return {**self._api_key_auth, **self._bearer_auth}
+        if self._api_key_auth:
+            return self._api_key_auth
+        if self._bearer_auth:
+            return self._bearer_auth
+        return {}
 
     @property
     def _api_key_auth(self) -> dict[str, str]:
@@ -183,14 +167,14 @@ class Anthropic(SyncAPIClient):
 
     @override
     def _validate_headers(self, headers: Headers, custom_headers: Headers) -> None:
-        if headers.get("Authorization") or headers.get("X-Api-Key"):
-            # valid
+        if self.api_key and headers.get("X-Api-Key"):
+            return
+        if isinstance(custom_headers.get("X-Api-Key"), Omit):
             return
 
-        if headers.get("X-Api-Key") or isinstance(custom_headers.get("X-Api-Key"), Omit):
+        if self.auth_token and headers.get("Authorization"):
             return
-
-        if headers.get("Authorization") or isinstance(custom_headers.get("Authorization"), Omit):
+        if isinstance(custom_headers.get("Authorization"), Omit):
             return
 
         raise TypeError(
@@ -203,9 +187,9 @@ class Anthropic(SyncAPIClient):
         api_key: str | None = None,
         auth_token: str | None = None,
         base_url: str | httpx.URL | None = None,
-        timeout: float | Timeout | None | NotGiven = not_given,
+        timeout: float | Timeout | None | NotGiven = NOT_GIVEN,
         http_client: httpx.Client | None = None,
-        max_retries: int | NotGiven = not_given,
+        max_retries: int | NotGiven = NOT_GIVEN,
         default_headers: Mapping[str, str] | None = None,
         set_default_headers: Mapping[str, str] | None = None,
         default_query: Mapping[str, object] | None = None,
@@ -291,6 +275,13 @@ class Anthropic(SyncAPIClient):
 
 
 class AsyncAnthropic(AsyncAPIClient):
+    completions: completions.AsyncCompletions
+    messages: messages.AsyncMessages
+    models: models.AsyncModels
+    beta: beta.AsyncBeta
+    with_raw_response: AsyncAnthropicWithRawResponse
+    with_streaming_response: AsyncAnthropicWithStreamedResponse
+
     # client options
     api_key: str | None
     auth_token: str | None
@@ -305,7 +296,7 @@ class AsyncAnthropic(AsyncAPIClient):
         api_key: str | None = None,
         auth_token: str | None = None,
         base_url: str | httpx.URL | None = None,
-        timeout: float | Timeout | None | NotGiven = not_given,
+        timeout: Union[float, Timeout, None, NotGiven] = NOT_GIVEN,
         max_retries: int = DEFAULT_MAX_RETRIES,
         default_headers: Mapping[str, str] | None = None,
         default_query: Mapping[str, object] | None = None,
@@ -355,37 +346,12 @@ class AsyncAnthropic(AsyncAPIClient):
 
         self._default_stream_cls = AsyncStream
 
-    @cached_property
-    def completions(self) -> AsyncCompletions:
-        from .resources.completions import AsyncCompletions
-
-        return AsyncCompletions(self)
-
-    @cached_property
-    def messages(self) -> AsyncMessages:
-        from .resources.messages import AsyncMessages
-
-        return AsyncMessages(self)
-
-    @cached_property
-    def models(self) -> AsyncModels:
-        from .resources.models import AsyncModels
-
-        return AsyncModels(self)
-
-    @cached_property
-    def beta(self) -> AsyncBeta:
-        from .resources.beta import AsyncBeta
-
-        return AsyncBeta(self)
-
-    @cached_property
-    def with_raw_response(self) -> AsyncAnthropicWithRawResponse:
-        return AsyncAnthropicWithRawResponse(self)
-
-    @cached_property
-    def with_streaming_response(self) -> AsyncAnthropicWithStreamedResponse:
-        return AsyncAnthropicWithStreamedResponse(self)
+        self.completions = completions.AsyncCompletions(self)
+        self.messages = messages.AsyncMessages(self)
+        self.models = models.AsyncModels(self)
+        self.beta = beta.AsyncBeta(self)
+        self.with_raw_response = AsyncAnthropicWithRawResponse(self)
+        self.with_streaming_response = AsyncAnthropicWithStreamedResponse(self)
 
     @property
     @override
@@ -395,7 +361,11 @@ class AsyncAnthropic(AsyncAPIClient):
     @property
     @override
     def auth_headers(self) -> dict[str, str]:
-        return {**self._api_key_auth, **self._bearer_auth}
+        if self._api_key_auth:
+            return self._api_key_auth
+        if self._bearer_auth:
+            return self._bearer_auth
+        return {}
 
     @property
     def _api_key_auth(self) -> dict[str, str]:
@@ -423,14 +393,14 @@ class AsyncAnthropic(AsyncAPIClient):
 
     @override
     def _validate_headers(self, headers: Headers, custom_headers: Headers) -> None:
-        if headers.get("Authorization") or headers.get("X-Api-Key"):
-            # valid
+        if self.api_key and headers.get("X-Api-Key"):
+            return
+        if isinstance(custom_headers.get("X-Api-Key"), Omit):
             return
 
-        if headers.get("X-Api-Key") or isinstance(custom_headers.get("X-Api-Key"), Omit):
+        if self.auth_token and headers.get("Authorization"):
             return
-
-        if headers.get("Authorization") or isinstance(custom_headers.get("Authorization"), Omit):
+        if isinstance(custom_headers.get("Authorization"), Omit):
             return
 
         raise TypeError(
@@ -443,9 +413,9 @@ class AsyncAnthropic(AsyncAPIClient):
         api_key: str | None = None,
         auth_token: str | None = None,
         base_url: str | httpx.URL | None = None,
-        timeout: float | Timeout | None | NotGiven = not_given,
+        timeout: float | Timeout | None | NotGiven = NOT_GIVEN,
         http_client: httpx.AsyncClient | None = None,
-        max_retries: int | NotGiven = not_given,
+        max_retries: int | NotGiven = NOT_GIVEN,
         default_headers: Mapping[str, str] | None = None,
         set_default_headers: Mapping[str, str] | None = None,
         default_query: Mapping[str, object] | None = None,
@@ -513,17 +483,11 @@ class AsyncAnthropic(AsyncAPIClient):
         if response.status_code == 409:
             return _exceptions.ConflictError(err_msg, response=response, body=body)
 
-        if response.status_code == 413:
-            return _exceptions.RequestTooLargeError(err_msg, response=response, body=body)
-
         if response.status_code == 422:
             return _exceptions.UnprocessableEntityError(err_msg, response=response, body=body)
 
         if response.status_code == 429:
             return _exceptions.RateLimitError(err_msg, response=response, body=body)
-
-        if response.status_code == 529:
-            return _exceptions.OverloadedError(err_msg, response=response, body=body)
 
         if response.status_code >= 500:
             return _exceptions.InternalServerError(err_msg, response=response, body=body)
@@ -531,127 +495,35 @@ class AsyncAnthropic(AsyncAPIClient):
 
 
 class AnthropicWithRawResponse:
-    _client: Anthropic
-
     def __init__(self, client: Anthropic) -> None:
-        self._client = client
-
-    @cached_property
-    def completions(self) -> completions.CompletionsWithRawResponse:
-        from .resources.completions import CompletionsWithRawResponse
-
-        return CompletionsWithRawResponse(self._client.completions)
-
-    @cached_property
-    def messages(self) -> messages.MessagesWithRawResponse:
-        from .resources.messages import MessagesWithRawResponse
-
-        return MessagesWithRawResponse(self._client.messages)
-
-    @cached_property
-    def models(self) -> models.ModelsWithRawResponse:
-        from .resources.models import ModelsWithRawResponse
-
-        return ModelsWithRawResponse(self._client.models)
-
-    @cached_property
-    def beta(self) -> beta.BetaWithRawResponse:
-        from .resources.beta import BetaWithRawResponse
-
-        return BetaWithRawResponse(self._client.beta)
+        self.completions = completions.CompletionsWithRawResponse(client.completions)
+        self.messages = messages.MessagesWithRawResponse(client.messages)
+        self.models = models.ModelsWithRawResponse(client.models)
+        self.beta = beta.BetaWithRawResponse(client.beta)
 
 
 class AsyncAnthropicWithRawResponse:
-    _client: AsyncAnthropic
-
     def __init__(self, client: AsyncAnthropic) -> None:
-        self._client = client
-
-    @cached_property
-    def completions(self) -> completions.AsyncCompletionsWithRawResponse:
-        from .resources.completions import AsyncCompletionsWithRawResponse
-
-        return AsyncCompletionsWithRawResponse(self._client.completions)
-
-    @cached_property
-    def messages(self) -> messages.AsyncMessagesWithRawResponse:
-        from .resources.messages import AsyncMessagesWithRawResponse
-
-        return AsyncMessagesWithRawResponse(self._client.messages)
-
-    @cached_property
-    def models(self) -> models.AsyncModelsWithRawResponse:
-        from .resources.models import AsyncModelsWithRawResponse
-
-        return AsyncModelsWithRawResponse(self._client.models)
-
-    @cached_property
-    def beta(self) -> beta.AsyncBetaWithRawResponse:
-        from .resources.beta import AsyncBetaWithRawResponse
-
-        return AsyncBetaWithRawResponse(self._client.beta)
+        self.completions = completions.AsyncCompletionsWithRawResponse(client.completions)
+        self.messages = messages.AsyncMessagesWithRawResponse(client.messages)
+        self.models = models.AsyncModelsWithRawResponse(client.models)
+        self.beta = beta.AsyncBetaWithRawResponse(client.beta)
 
 
 class AnthropicWithStreamedResponse:
-    _client: Anthropic
-
     def __init__(self, client: Anthropic) -> None:
-        self._client = client
-
-    @cached_property
-    def completions(self) -> completions.CompletionsWithStreamingResponse:
-        from .resources.completions import CompletionsWithStreamingResponse
-
-        return CompletionsWithStreamingResponse(self._client.completions)
-
-    @cached_property
-    def messages(self) -> messages.MessagesWithStreamingResponse:
-        from .resources.messages import MessagesWithStreamingResponse
-
-        return MessagesWithStreamingResponse(self._client.messages)
-
-    @cached_property
-    def models(self) -> models.ModelsWithStreamingResponse:
-        from .resources.models import ModelsWithStreamingResponse
-
-        return ModelsWithStreamingResponse(self._client.models)
-
-    @cached_property
-    def beta(self) -> beta.BetaWithStreamingResponse:
-        from .resources.beta import BetaWithStreamingResponse
-
-        return BetaWithStreamingResponse(self._client.beta)
+        self.completions = completions.CompletionsWithStreamingResponse(client.completions)
+        self.messages = messages.MessagesWithStreamingResponse(client.messages)
+        self.models = models.ModelsWithStreamingResponse(client.models)
+        self.beta = beta.BetaWithStreamingResponse(client.beta)
 
 
 class AsyncAnthropicWithStreamedResponse:
-    _client: AsyncAnthropic
-
     def __init__(self, client: AsyncAnthropic) -> None:
-        self._client = client
-
-    @cached_property
-    def completions(self) -> completions.AsyncCompletionsWithStreamingResponse:
-        from .resources.completions import AsyncCompletionsWithStreamingResponse
-
-        return AsyncCompletionsWithStreamingResponse(self._client.completions)
-
-    @cached_property
-    def messages(self) -> messages.AsyncMessagesWithStreamingResponse:
-        from .resources.messages import AsyncMessagesWithStreamingResponse
-
-        return AsyncMessagesWithStreamingResponse(self._client.messages)
-
-    @cached_property
-    def models(self) -> models.AsyncModelsWithStreamingResponse:
-        from .resources.models import AsyncModelsWithStreamingResponse
-
-        return AsyncModelsWithStreamingResponse(self._client.models)
-
-    @cached_property
-    def beta(self) -> beta.AsyncBetaWithStreamingResponse:
-        from .resources.beta import AsyncBetaWithStreamingResponse
-
-        return AsyncBetaWithStreamingResponse(self._client.beta)
+        self.completions = completions.AsyncCompletionsWithStreamingResponse(client.completions)
+        self.messages = messages.AsyncMessagesWithStreamingResponse(client.messages)
+        self.models = models.AsyncModelsWithStreamingResponse(client.models)
+        self.beta = beta.AsyncBetaWithStreamingResponse(client.beta)
 
 
 Client = Anthropic

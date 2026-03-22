@@ -2,15 +2,13 @@
 
 from __future__ import annotations
 
-import inspect
 import warnings
-from typing import TYPE_CHECKING, List, Type, Union, Iterable, Optional, cast
+from typing import List, Union, Iterable
 from functools import partial
 from itertools import chain
 from typing_extensions import Literal, overload
 
 import httpx
-import pydantic
 
 from .... import _legacy_response
 from .batches import (
@@ -21,62 +19,38 @@ from .batches import (
     BatchesWithStreamingResponse,
     AsyncBatchesWithStreamingResponse,
 )
-from ...._types import NOT_GIVEN, Body, Omit, Query, Headers, NotGiven, SequenceNotStr, omit, not_given
-from ...._utils import is_given, required_args, maybe_transform, strip_not_given, async_maybe_transform
+from ...._types import NOT_GIVEN, Body, Query, Headers, NotGiven
+from ...._utils import (
+    is_given,
+    required_args,
+    maybe_transform,
+    strip_not_given,
+    async_maybe_transform,
+)
 from ...._compat import cached_property
-from ...._models import TypeAdapter
 from ...._resource import SyncAPIResource, AsyncAPIResource
 from ...._response import to_streamed_response_wrapper, async_to_streamed_response_wrapper
-from ....lib.tools import (
-    BetaToolRunner,
-    BetaAsyncToolRunner,
-    BetaStreamingToolRunner,
-    BetaAsyncStreamingToolRunner,
-)
-from ...._constants import DEFAULT_TIMEOUT, MODEL_NONSTREAMING_TOKENS
+from ...._constants import DEFAULT_TIMEOUT
 from ...._streaming import Stream, AsyncStream
 from ....types.beta import (
     BetaThinkingConfigParam,
     message_create_params,
     message_count_tokens_params,
 )
-from ...._exceptions import AnthropicError
 from ...._base_client import make_request_options
-from ...._utils._utils import is_dict
 from ....lib.streaming import BetaMessageStreamManager, BetaAsyncMessageStreamManager
-from ...messages.messages import DEPRECATED_MODELS, MODELS_TO_WARN_WITH_THINKING_ENABLED
+from ...messages.messages import DEPRECATED_MODELS
 from ....types.model_param import ModelParam
-from ....lib._parse._response import ResponseFormatT, parse_beta_response
-from ....lib._parse._transform import transform_schema
-from ....lib._stainless_helpers import stainless_helper_header as _stainless_helper_header
 from ....types.beta.beta_message import BetaMessage
-from ....lib.tools._beta_functions import (
-    BetaFunctionTool,
-    BetaRunnableTool,
-    BetaAsyncFunctionTool,
-    BetaAsyncRunnableTool,
-    BetaBuiltinFunctionTool,
-    BetaAsyncBuiltinFunctionTool,
-)
 from ....types.anthropic_beta_param import AnthropicBetaParam
 from ....types.beta.beta_message_param import BetaMessageParam
 from ....types.beta.beta_metadata_param import BetaMetadataParam
-from ....types.beta.parsed_beta_message import ParsedBetaMessage
 from ....types.beta.beta_text_block_param import BetaTextBlockParam
 from ....types.beta.beta_tool_union_param import BetaToolUnionParam
 from ....types.beta.beta_tool_choice_param import BetaToolChoiceParam
-from ....lib.tools._beta_compaction_control import CompactionControl
-from ....types.beta.beta_output_config_param import BetaOutputConfigParam
 from ....types.beta.beta_message_tokens_count import BetaMessageTokensCount
 from ....types.beta.beta_thinking_config_param import BetaThinkingConfigParam
-from ....types.beta.beta_json_output_format_param import BetaJSONOutputFormatParam
 from ....types.beta.beta_raw_message_stream_event import BetaRawMessageStreamEvent
-from ....types.beta.beta_cache_control_ephemeral_param import BetaCacheControlEphemeralParam
-from ....types.beta.beta_context_management_config_param import BetaContextManagementConfigParam
-from ....types.beta.beta_request_mcp_server_url_definition_param import BetaRequestMCPServerURLDefinitionParam
-
-if TYPE_CHECKING:
-    from ...._client import Anthropic, AsyncAnthropic
 
 __all__ = ["Messages", "AsyncMessages"]
 
@@ -112,32 +86,23 @@ class Messages(SyncAPIResource):
         max_tokens: int,
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaMessage:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -146,8 +111,7 @@ class Messages(SyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -156,7 +120,7 @@ class Messages(SyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -215,52 +179,41 @@ class Messages(SyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
               details and options.
 
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          context_management: Context management configuration.
-
-              This allows you to control how Claude manages context across multiple requests,
-              such as whether to clear function results or not.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
-
-          mcp_servers: MCP servers to be utilized in this request
-
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          output_format: Deprecated: Use `output_config.format` instead. See
-              [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-              A schema to specify Claude's output format in responses. This parameter will be
-              removed in a future release.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
-
-          speed: The inference speed mode for this request. `"fast"` enables high
-              output-tokens-per-second inference.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -274,13 +227,14 @@ class Messages(SyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           system: System prompt.
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -298,7 +252,7 @@ class Messages(SyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -310,12 +264,6 @@ class Messages(SyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -378,7 +326,7 @@ class Messages(SyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -418,31 +366,22 @@ class Messages(SyncAPIResource):
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
         stream: Literal[True],
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> Stream[BetaRawMessageStreamEvent]:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -451,8 +390,7 @@ class Messages(SyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -461,7 +399,7 @@ class Messages(SyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -520,14 +458,35 @@ class Messages(SyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
@@ -535,41 +494,10 @@ class Messages(SyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
-
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          context_management: Context management configuration.
-
-              This allows you to control how Claude manages context across multiple requests,
-              such as whether to clear function results or not.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
-
-          mcp_servers: MCP servers to be utilized in this request
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          output_format: Deprecated: Use `output_config.format` instead. See
-              [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-              A schema to specify Claude's output format in responses. This parameter will be
-              removed in a future release.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
-
-          speed: The inference speed mode for this request. `"fast"` enables high
-              output-tokens-per-second inference.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -585,7 +513,7 @@ class Messages(SyncAPIResource):
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -603,7 +531,7 @@ class Messages(SyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -615,12 +543,6 @@ class Messages(SyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -683,7 +605,7 @@ class Messages(SyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -723,31 +645,22 @@ class Messages(SyncAPIResource):
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
         stream: bool,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaMessage | Stream[BetaRawMessageStreamEvent]:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -756,8 +669,7 @@ class Messages(SyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -766,7 +678,7 @@ class Messages(SyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -825,14 +737,35 @@ class Messages(SyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
@@ -840,41 +773,10 @@ class Messages(SyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
-
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          context_management: Context management configuration.
-
-              This allows you to control how Claude manages context across multiple requests,
-              such as whether to clear function results or not.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
-
-          mcp_servers: MCP servers to be utilized in this request
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          output_format: Deprecated: Use `output_config.format` instead. See
-              [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-              A schema to specify Claude's output format in responses. This parameter will be
-              removed in a future release.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
-
-          speed: The inference speed mode for this request. `"fast"` enables high
-              output-tokens-per-second inference.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -890,7 +792,7 @@ class Messages(SyncAPIResource):
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -908,7 +810,7 @@ class Messages(SyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -920,12 +822,6 @@ class Messages(SyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -988,7 +884,7 @@ class Messages(SyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -1027,41 +923,26 @@ class Messages(SyncAPIResource):
         max_tokens: int,
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | Literal[True] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaMessage | Stream[BetaRawMessageStreamEvent]:
-        validate_output_format(output_format)
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
         if not stream and not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
-            timeout = self._client._calculate_nonstreaming_timeout(
-                max_tokens, MODEL_NONSTREAMING_TOKENS.get(model, None)
-            )
+            timeout = self._client._calculate_nonstreaming_timeout(max_tokens)
 
         if model in DEPRECATED_MODELS:
             warnings.warn(
@@ -1070,18 +951,8 @@ class Messages(SyncAPIResource):
                 stacklevel=3,
             )
 
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
-        merged_output_config = _merge_output_configs(output_config, output_format)
-
         extra_headers = {
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else not_given}),
-            **_stainless_helper_header(tools, messages),
+            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else NOT_GIVEN}),
             **(extra_headers or {}),
         }
         return self._post(
@@ -1091,16 +962,7 @@ class Messages(SyncAPIResource):
                     "max_tokens": max_tokens,
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
-                    "container": container,
-                    "context_management": context_management,
-                    "inference_geo": inference_geo,
-                    "mcp_servers": mcp_servers,
                     "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "output_format": omit,
-                    "service_tier": service_tier,
-                    "speed": speed,
                     "stop_sequences": stop_sequences,
                     "stream": stream,
                     "system": system,
@@ -1111,9 +973,7 @@ class Messages(SyncAPIResource):
                     "top_k": top_k,
                     "top_p": top_p,
                 },
-                message_create_params.MessageCreateParamsStreaming
-                if stream
-                else message_create_params.MessageCreateParamsNonStreaming,
+                message_create_params.MessageCreateParams,
             ),
             options=make_request_options(
                 extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
@@ -1123,465 +983,35 @@ class Messages(SyncAPIResource):
             stream_cls=Stream[BetaRawMessageStreamEvent],
         )
 
-    def parse(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> ParsedBetaMessage[ResponseFormatT]:
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
-        if not stream and not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
-            timeout = self._client._calculate_nonstreaming_timeout(
-                max_tokens, MODEL_NONSTREAMING_TOKENS.get(model, None)
-            )
-
-        if model in DEPRECATED_MODELS:
-            warnings.warn(
-                f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
-        betas = [beta for beta in betas] if is_given(betas) else []
-
-        if "structured-outputs-2025-12-15" not in betas:
-            # Ensure structured outputs beta is included for parse method
-            betas.append("structured-outputs-2025-12-15")
-
-        extra_headers = {
-            "X-Stainless-Helper": "beta.messages.parse",
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else NOT_GIVEN}),
-            **_stainless_helper_header(tools, messages),
-            **(extra_headers or {}),
-        }
-
-        if is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[ResponseFormatT] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = BetaJSONOutputFormatParam(
-                    schema=transform_schema(schema), type="json_schema"
-                )
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-            merged_output_config = _merge_output_configs(output_config, transformed_output_format)
-        else:
-            merged_output_config = output_config
-
-        def parser(response: BetaMessage) -> ParsedBetaMessage[ResponseFormatT]:
-            return parse_beta_response(
-                response=response,
-                output_format=cast(
-                    ResponseFormatT,
-                    output_format if is_given(output_format) and output_format is not None else NOT_GIVEN,
-                ),
-            )
-
-        return self._post(
-            "/v1/messages?beta=true",
-            body=maybe_transform(
-                {
-                    "max_tokens": max_tokens,
-                    "messages": messages,
-                    "model": model,
-                    "cache_control": cache_control,
-                    "container": container,
-                    "context_management": context_management,
-                    "inference_geo": inference_geo,
-                    "mcp_servers": mcp_servers,
-                    "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "output_format": omit,
-                    "service_tier": service_tier,
-                    "speed": speed,
-                    "stop_sequences": stop_sequences,
-                    "stream": stream,
-                    "system": system,
-                    "temperature": temperature,
-                    "thinking": thinking,
-                    "tool_choice": tool_choice,
-                    "tools": tools,
-                    "top_k": top_k,
-                    "top_p": top_p,
-                },
-                message_create_params.MessageCreateParamsNonStreaming,
-            ),
-            options=make_request_options(
-                extra_headers=extra_headers,
-                extra_query=extra_query,
-                extra_body=extra_body,
-                timeout=timeout,
-                post_parser=parser,
-            ),
-            cast_to=cast(Type[ParsedBetaMessage[ResponseFormatT]], BetaMessage),
-            stream=False,
-        )
-
-    @overload
-    def tool_runner(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        tools: Iterable[BetaRunnableTool | BetaToolUnionParam],
-        compaction_control: CompactionControl | Omit = omit,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        max_iterations: int | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaToolRunner[ResponseFormatT]: ...
-
-    @overload
-    def tool_runner(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        tools: Iterable[BetaRunnableTool | BetaToolUnionParam],
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        compaction_control: CompactionControl | Omit = omit,
-        stream: Literal[True],
-        max_iterations: int | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaStreamingToolRunner[ResponseFormatT]: ...
-
-    @overload
-    def tool_runner(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        tools: Iterable[BetaRunnableTool | BetaToolUnionParam],
-        compaction_control: CompactionControl | Omit = omit,
-        stream: bool,
-        max_iterations: int | Omit = omit,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaStreamingToolRunner[ResponseFormatT] | BetaToolRunner[ResponseFormatT]: ...
-
-    def tool_runner(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        tools: Iterable[BetaRunnableTool | BetaToolUnionParam],
-        compaction_control: CompactionControl | Omit = omit,
-        max_iterations: int | Omit = omit,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: bool | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaStreamingToolRunner[ResponseFormatT] | BetaToolRunner[ResponseFormatT]:
-        """Create a Message stream"""
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
-        if model in DEPRECATED_MODELS:
-            warnings.warn(
-                f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
-        extra_headers = {
-            "X-Stainless-Helper": "BetaToolRunner",
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else NOT_GIVEN}),
-            **_stainless_helper_header(tools, messages),
-            **(extra_headers or {}),
-        }
-
-        runnable_tools: list[BetaRunnableTool] = []
-        raw_tools: list[BetaToolUnionParam] = []
-
-        for tool in tools:
-            if isinstance(tool, (BetaFunctionTool, BetaBuiltinFunctionTool)):
-                runnable_tools.append(tool)
-            else:
-                raw_tools.append(tool)
-
-        params = cast(
-            message_create_params.ParseMessageCreateParamsBase[ResponseFormatT],
-            {
-                "max_tokens": max_tokens,
-                "messages": messages,
-                "model": model,
-                "cache_control": cache_control,
-                "container": container,
-                "context_management": context_management,
-                "inference_geo": inference_geo,
-                "mcp_servers": mcp_servers,
-                "metadata": metadata,
-                "output_config": output_config,
-                "output_format": output_format,
-                "service_tier": service_tier,
-                "speed": speed,
-                "stop_sequences": stop_sequences,
-                "system": system,
-                "temperature": temperature,
-                "thinking": thinking,
-                "tool_choice": tool_choice,
-                "tools": [*[tool.to_dict() for tool in runnable_tools], *raw_tools],
-                "top_k": top_k,
-                "top_p": top_p,
-            },
-        )
-
-        if stream:
-            return BetaStreamingToolRunner[ResponseFormatT](
-                tools=runnable_tools,
-                params=params,
-                options={
-                    "extra_headers": extra_headers,
-                    "extra_query": extra_query,
-                    "extra_body": extra_body,
-                    "timeout": timeout,
-                },
-                client=cast("Anthropic", self._client),
-                max_iterations=max_iterations if is_given(max_iterations) else None,
-                compaction_control=compaction_control if is_given(compaction_control) else None,
-            )
-        return BetaToolRunner[ResponseFormatT](
-            tools=runnable_tools,
-            params=params,
-            options={
-                "extra_headers": extra_headers,
-                "extra_query": extra_query,
-                "extra_body": extra_body,
-                "timeout": timeout,
-            },
-            client=cast("Anthropic", self._client),
-            max_iterations=max_iterations if is_given(max_iterations) else None,
-            compaction_control=compaction_control if is_given(compaction_control) else None,
-        )
-
     def stream(
         self,
         *,
         max_tokens: int,
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: None | BetaJSONOutputFormatParam | type[ResponseFormatT] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaMessageStreamManager[ResponseFormatT]:
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
-        if model in DEPRECATED_MODELS:
-            warnings.warn(
-                f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
+    ) -> BetaMessageStreamManager:
         """Create a Message stream"""
         extra_headers = {
-            "X-Stainless-Helper-Method": "stream",
             "X-Stainless-Stream-Helper": "beta.messages",
             **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else NOT_GIVEN}),
-            **_stainless_helper_header(tools, messages),
             **(extra_headers or {}),
         }
-
-        transformed_output_format: BetaJSONOutputFormatParam | Omit = omit
-
-        if is_dict(output_format):
-            transformed_output_format = cast(BetaJSONOutputFormatParam, output_format)
-        elif is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[ResponseFormatT] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = BetaJSONOutputFormatParam(
-                    schema=transform_schema(schema), type="json_schema"
-                )
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-        merged_output_config = _merge_output_configs(output_config, transformed_output_format)
-
         make_request = partial(
             self._post,
             "/v1/messages?beta=true",
@@ -1590,16 +1020,7 @@ class Messages(SyncAPIResource):
                     "max_tokens": max_tokens,
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
                     "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "output_format": omit,
-                    "container": container,
-                    "context_management": context_management,
-                    "inference_geo": inference_geo,
-                    "mcp_servers": mcp_servers,
-                    "service_tier": service_tier,
-                    "speed": speed,
                     "stop_sequences": stop_sequences,
                     "system": system,
                     "temperature": temperature,
@@ -1619,33 +1040,24 @@ class Messages(SyncAPIResource):
             stream=True,
             stream_cls=Stream[BetaRawMessageStreamEvent],
         )
-        return BetaMessageStreamManager(
-            make_request,
-            output_format=NOT_GIVEN if is_dict(output_format) else cast(ResponseFormatT, output_format),
-        )
+        return BetaMessageStreamManager(make_request)
 
     def count_tokens(
         self,
         *,
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[message_count_tokens_params.Tool] | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[message_count_tokens_params.Tool] | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaMessageTokensCount:
         """
         Count the number of tokens in a Message.
@@ -1654,7 +1066,7 @@ class Messages(SyncAPIResource):
         including tools, images, and documents, without creating it.
 
         Learn more about token counting in our
-        [user guide](https://docs.claude.com/en/docs/build-with-claude/token-counting)
+        [user guide](/en/docs/build-with-claude/token-counting)
 
         Args:
           messages: Input messages.
@@ -1714,45 +1126,45 @@ class Messages(SyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
               details and options.
 
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          context_management: Context management configuration.
-
-              This allows you to control how Claude manages context across multiple requests,
-              such as whether to clear function results or not.
-
-          mcp_servers: MCP servers to be utilized in this request
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          output_format: Deprecated: Use `output_config.format` instead. See
-              [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-              A schema to specify Claude's output format in responses. This parameter will be
-              removed in a future release.
-
-          speed: The inference speed mode for this request. `"fast"` enables high
-              output-tokens-per-second inference.
-
           system: System prompt.
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           thinking: Configuration for enabling Claude's extended thinking.
 
@@ -1761,7 +1173,7 @@ class Messages(SyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -1773,12 +1185,6 @@ class Messages(SyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -1841,7 +1247,7 @@ class Messages(SyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           betas: Optional header to specify the beta version(s) you want to use.
 
@@ -1853,17 +1259,12 @@ class Messages(SyncAPIResource):
 
           timeout: Override the client-level default timeout for this request, in seconds
         """
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
-        merged_output_config = _merge_output_configs(output_config, output_format)
-
         extra_headers = {
             **strip_not_given(
                 {
                     "anthropic-beta": ",".join(chain((str(e) for e in betas), ["token-counting-2024-11-01"]))
                     if is_given(betas)
-                    else not_given
+                    else NOT_GIVEN
                 }
             ),
             **(extra_headers or {}),
@@ -1875,12 +1276,6 @@ class Messages(SyncAPIResource):
                 {
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
-                    "context_management": context_management,
-                    "mcp_servers": mcp_servers,
-                    "output_config": merged_output_config,
-                    "output_format": omit,
-                    "speed": speed,
                     "system": system,
                     "thinking": thinking,
                     "tool_choice": tool_choice,
@@ -1926,32 +1321,23 @@ class AsyncMessages(AsyncAPIResource):
         max_tokens: int,
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaMessage:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -1960,8 +1346,7 @@ class AsyncMessages(AsyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -1970,7 +1355,7 @@ class AsyncMessages(AsyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -2029,52 +1414,41 @@ class AsyncMessages(AsyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
               details and options.
 
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          context_management: Context management configuration.
-
-              This allows you to control how Claude manages context across multiple requests,
-              such as whether to clear function results or not.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
-
-          mcp_servers: MCP servers to be utilized in this request
-
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          output_format: Deprecated: Use `output_config.format` instead. See
-              [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-              A schema to specify Claude's output format in responses. This parameter will be
-              removed in a future release.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
-
-          speed: The inference speed mode for this request. `"fast"` enables high
-              output-tokens-per-second inference.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -2088,13 +1462,14 @@ class AsyncMessages(AsyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           system: System prompt.
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -2112,7 +1487,7 @@ class AsyncMessages(AsyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -2124,12 +1499,6 @@ class AsyncMessages(AsyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -2192,7 +1561,7 @@ class AsyncMessages(AsyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -2232,31 +1601,22 @@ class AsyncMessages(AsyncAPIResource):
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
         stream: Literal[True],
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> AsyncStream[BetaRawMessageStreamEvent]:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -2265,8 +1625,7 @@ class AsyncMessages(AsyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -2275,7 +1634,7 @@ class AsyncMessages(AsyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -2334,14 +1693,35 @@ class AsyncMessages(AsyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
@@ -2349,41 +1729,10 @@ class AsyncMessages(AsyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
-
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          context_management: Context management configuration.
-
-              This allows you to control how Claude manages context across multiple requests,
-              such as whether to clear function results or not.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
-
-          mcp_servers: MCP servers to be utilized in this request
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          output_format: Deprecated: Use `output_config.format` instead. See
-              [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-              A schema to specify Claude's output format in responses. This parameter will be
-              removed in a future release.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
-
-          speed: The inference speed mode for this request. `"fast"` enables high
-              output-tokens-per-second inference.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -2399,7 +1748,7 @@ class AsyncMessages(AsyncAPIResource):
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -2417,7 +1766,7 @@ class AsyncMessages(AsyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -2429,12 +1778,6 @@ class AsyncMessages(AsyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -2497,7 +1840,7 @@ class AsyncMessages(AsyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -2537,31 +1880,22 @@ class AsyncMessages(AsyncAPIResource):
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
         stream: bool,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaMessage | AsyncStream[BetaRawMessageStreamEvent]:
         """
         Send a structured list of input messages with text and/or image content, and the
@@ -2570,8 +1904,7 @@ class AsyncMessages(AsyncAPIResource):
         The Messages API can be used for either single queries or stateless multi-turn
         conversations.
 
-        Learn more about the Messages API in our
-        [user guide](https://docs.claude.com/en/docs/initial-setup)
+        Learn more about the Messages API in our [user guide](/en/docs/initial-setup)
 
         Args:
           max_tokens: The maximum number of tokens to generate before stopping.
@@ -2580,7 +1913,7 @@ class AsyncMessages(AsyncAPIResource):
               only specifies the absolute maximum number of tokens to generate.
 
               Different models have different maximum values for this parameter. See
-              [models](https://docs.claude.com/en/docs/models-overview) for details.
+              [models](https://docs.anthropic.com/en/docs/models-overview) for details.
 
           messages: Input messages.
 
@@ -2639,14 +1972,35 @@ class AsyncMessages(AsyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
@@ -2654,41 +2008,10 @@ class AsyncMessages(AsyncAPIResource):
 
           stream: Whether to incrementally stream the response using server-sent events.
 
-              See [streaming](https://docs.claude.com/en/api/messages-streaming) for details.
-
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          container: Container identifier for reuse across requests.
-
-          context_management: Context management configuration.
-
-              This allows you to control how Claude manages context across multiple requests,
-              such as whether to clear function results or not.
-
-          inference_geo: Specifies the geographic region for inference processing. If not specified, the
-              workspace's `default_inference_geo` is used.
-
-          mcp_servers: MCP servers to be utilized in this request
+              See [streaming](https://docs.anthropic.com/en/api/messages-streaming) for
+              details.
 
           metadata: An object describing metadata about the request.
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          output_format: Deprecated: Use `output_config.format` instead. See
-              [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-              A schema to specify Claude's output format in responses. This parameter will be
-              removed in a future release.
-
-          service_tier: Determines whether to use priority capacity (if available) or standard capacity
-              for this request.
-
-              Anthropic offers different levels of service for your API requests. See
-              [service-tiers](https://docs.claude.com/en/api/service-tiers) for details.
-
-          speed: The inference speed mode for this request. `"fast"` enables high
-              output-tokens-per-second inference.
 
           stop_sequences: Custom text sequences that will cause the model to stop generating.
 
@@ -2704,7 +2027,7 @@ class AsyncMessages(AsyncAPIResource):
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           temperature: Amount of randomness injected into the response.
 
@@ -2722,7 +2045,7 @@ class AsyncMessages(AsyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -2734,12 +2057,6 @@ class AsyncMessages(AsyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -2802,7 +2119,7 @@ class AsyncMessages(AsyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           top_k: Only sample from the top K options for each subsequent token.
 
@@ -2841,41 +2158,26 @@ class AsyncMessages(AsyncAPIResource):
         max_tokens: int,
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        stream: Literal[False] | Literal[True] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaMessage | AsyncStream[BetaRawMessageStreamEvent]:
-        validate_output_format(output_format)
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
         if not stream and not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
-            timeout = self._client._calculate_nonstreaming_timeout(
-                max_tokens, MODEL_NONSTREAMING_TOKENS.get(model, None)
-            )
+            timeout = self._client._calculate_nonstreaming_timeout(max_tokens)
 
         if model in DEPRECATED_MODELS:
             warnings.warn(
@@ -2884,18 +2186,8 @@ class AsyncMessages(AsyncAPIResource):
                 stacklevel=3,
             )
 
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
-        merged_output_config = _merge_output_configs(output_config, output_format)
-
         extra_headers = {
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else not_given}),
-            **_stainless_helper_header(tools, messages),
+            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else NOT_GIVEN}),
             **(extra_headers or {}),
         }
         return await self._post(
@@ -2905,16 +2197,7 @@ class AsyncMessages(AsyncAPIResource):
                     "max_tokens": max_tokens,
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
-                    "container": container,
-                    "context_management": context_management,
-                    "inference_geo": inference_geo,
-                    "mcp_servers": mcp_servers,
                     "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "output_format": omit,
-                    "service_tier": service_tier,
-                    "speed": speed,
                     "stop_sequences": stop_sequences,
                     "stream": stream,
                     "system": system,
@@ -2925,9 +2208,7 @@ class AsyncMessages(AsyncAPIResource):
                     "top_k": top_k,
                     "top_p": top_p,
                 },
-                message_create_params.MessageCreateParamsStreaming
-                if stream
-                else message_create_params.MessageCreateParamsNonStreaming,
+                message_create_params.MessageCreateParams,
             ),
             options=make_request_options(
                 extra_headers=extra_headers, extra_query=extra_query, extra_body=extra_body, timeout=timeout
@@ -2937,473 +2218,42 @@ class AsyncMessages(AsyncAPIResource):
             stream_cls=AsyncStream[BetaRawMessageStreamEvent],
         )
 
-    async def parse(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Literal[True] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> ParsedBetaMessage[ResponseFormatT]:
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
-        if not stream and not is_given(timeout) and self._client.timeout == DEFAULT_TIMEOUT:
-            timeout = self._client._calculate_nonstreaming_timeout(
-                max_tokens, MODEL_NONSTREAMING_TOKENS.get(model, None)
-            )
-
-        if model in DEPRECATED_MODELS:
-            warnings.warn(
-                f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-        betas = [beta for beta in betas] if is_given(betas) else []
-
-        if "structured-outputs-2025-12-15" not in betas:
-            # Ensure structured outputs beta is included for parse method
-            betas.append("structured-outputs-2025-12-15")
-
-        extra_headers = {
-            "X-Stainless-Helper": "beta.messages.parse",
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else NOT_GIVEN}),
-            **_stainless_helper_header(tools, messages),
-            **(extra_headers or {}),
-        }
-
-        if is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[ResponseFormatT] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = BetaJSONOutputFormatParam(
-                    schema=transform_schema(schema), type="json_schema"
-                )
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-            merged_output_config = _merge_output_configs(output_config, transformed_output_format)
-        else:
-            merged_output_config = output_config
-
-        def parser(response: BetaMessage) -> ParsedBetaMessage[ResponseFormatT]:
-            return parse_beta_response(
-                response=response,
-                output_format=cast(
-                    ResponseFormatT,
-                    output_format if is_given(output_format) and output_format is not None else NOT_GIVEN,
-                ),
-            )
-
-        return await self._post(
-            "/v1/messages?beta=true",
-            body=maybe_transform(
-                {
-                    "max_tokens": max_tokens,
-                    "messages": messages,
-                    "model": model,
-                    "cache_control": cache_control,
-                    "container": container,
-                    "context_management": context_management,
-                    "inference_geo": inference_geo,
-                    "mcp_servers": mcp_servers,
-                    "output_config": merged_output_config,
-                    "metadata": metadata,
-                    "output_format": omit,
-                    "service_tier": service_tier,
-                    "speed": speed,
-                    "stop_sequences": stop_sequences,
-                    "stream": stream,
-                    "system": system,
-                    "temperature": temperature,
-                    "thinking": thinking,
-                    "tool_choice": tool_choice,
-                    "tools": tools,
-                    "top_k": top_k,
-                    "top_p": top_p,
-                },
-                message_create_params.MessageCreateParamsNonStreaming,
-            ),
-            options=make_request_options(
-                extra_headers=extra_headers,
-                extra_query=extra_query,
-                extra_body=extra_body,
-                timeout=timeout,
-                post_parser=parser,
-            ),
-            cast_to=cast(Type[ParsedBetaMessage[ResponseFormatT]], BetaMessage),
-            stream=False,
-        )
-
-    @overload
-    def tool_runner(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        tools: Iterable[BetaAsyncRunnableTool | BetaToolUnionParam],
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        compaction_control: CompactionControl | Omit = omit,
-        max_iterations: int | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[False] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaAsyncToolRunner[ResponseFormatT]: ...
-
-    @overload
-    def tool_runner(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        tools: Iterable[BetaAsyncRunnableTool | BetaToolUnionParam],
-        compaction_control: CompactionControl | Omit = omit,
-        stream: Literal[True],
-        max_iterations: int | Omit = omit,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaAsyncStreamingToolRunner[ResponseFormatT]: ...
-
-    @overload
-    def tool_runner(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        tools: Iterable[BetaAsyncRunnableTool | BetaToolUnionParam],
-        compaction_control: CompactionControl | Omit = omit,
-        stream: bool,
-        max_iterations: int | Omit = omit,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaAsyncStreamingToolRunner[ResponseFormatT] | BetaAsyncToolRunner[ResponseFormatT]: ...
-
-    def tool_runner(
-        self,
-        *,
-        max_tokens: int,
-        messages: Iterable[BetaMessageParam],
-        model: ModelParam,
-        tools: Iterable[BetaAsyncRunnableTool | BetaToolUnionParam],
-        compaction_control: CompactionControl | Omit = omit,
-        max_iterations: int | Omit = omit,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[type[ResponseFormatT]] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        stream: Literal[True] | Literal[False] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
-        # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
-        # The extra values given here take precedence over values defined on the client or passed to this method.
-        extra_headers: Headers | None = None,
-        extra_query: Query | None = None,
-        extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaAsyncToolRunner[ResponseFormatT] | BetaAsyncStreamingToolRunner[ResponseFormatT]:
-        """Create a Message stream"""
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
-        if model in DEPRECATED_MODELS:
-            warnings.warn(
-                f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
-        extra_headers = {
-            "X-Stainless-Helper": "BetaToolRunner",
-            **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else NOT_GIVEN}),
-            **_stainless_helper_header(tools, messages),
-            **(extra_headers or {}),
-        }
-
-        runnable_tools: list[BetaAsyncRunnableTool] = []
-        raw_tools: list[BetaToolUnionParam] = []
-
-        for tool in tools:
-            if isinstance(tool, (BetaAsyncFunctionTool, BetaAsyncBuiltinFunctionTool)):
-                runnable_tools.append(tool)
-            else:
-                raw_tools.append(tool)
-
-        params = cast(
-            message_create_params.ParseMessageCreateParamsBase[ResponseFormatT],
-            {
-                "max_tokens": max_tokens,
-                "messages": messages,
-                "model": model,
-                "cache_control": cache_control,
-                "container": container,
-                "context_management": context_management,
-                "inference_geo": inference_geo,
-                "mcp_servers": mcp_servers,
-                "metadata": metadata,
-                "output_config": output_config,
-                "output_format": output_format,
-                "service_tier": service_tier,
-                "speed": speed,
-                "stop_sequences": stop_sequences,
-                "system": system,
-                "temperature": temperature,
-                "thinking": thinking,
-                "tool_choice": tool_choice,
-                "tools": [*[tool.to_dict() for tool in runnable_tools], *raw_tools],
-                "top_k": top_k,
-                "top_p": top_p,
-            },
-        )
-
-        if stream:
-            return BetaAsyncStreamingToolRunner[ResponseFormatT](
-                tools=runnable_tools,
-                params=params,
-                options={
-                    "extra_headers": extra_headers,
-                    "extra_query": extra_query,
-                    "extra_body": extra_body,
-                    "timeout": timeout,
-                },
-                client=cast("AsyncAnthropic", self._client),
-                max_iterations=max_iterations if is_given(max_iterations) else None,
-                compaction_control=compaction_control if is_given(compaction_control) else None,
-            )
-        return BetaAsyncToolRunner[ResponseFormatT](
-            tools=runnable_tools,
-            params=params,
-            options={
-                "extra_headers": extra_headers,
-                "extra_query": extra_query,
-                "extra_body": extra_body,
-                "timeout": timeout,
-            },
-            client=cast("AsyncAnthropic", self._client),
-            max_iterations=max_iterations if is_given(max_iterations) else None,
-            compaction_control=compaction_control if is_given(compaction_control) else None,
-        )
-
     def stream(
         self,
         *,
         max_tokens: int,
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        metadata: BetaMetadataParam | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: None | type[ResponseFormatT] | BetaJSONOutputFormatParam | Omit = omit,
-        container: Optional[message_create_params.Container] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        inference_geo: Optional[str] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        service_tier: Literal["auto", "standard_only"] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        stop_sequences: SequenceNotStr[str] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        temperature: float | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[BetaToolUnionParam] | Omit = omit,
-        top_k: int | Omit = omit,
-        top_p: float | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        metadata: BetaMetadataParam | NotGiven = NOT_GIVEN,
+        stop_sequences: List[str] | NotGiven = NOT_GIVEN,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        temperature: float | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[BetaToolUnionParam] | NotGiven = NOT_GIVEN,
+        top_k: int | NotGiven = NOT_GIVEN,
+        top_p: float | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
         timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
-    ) -> BetaAsyncMessageStreamManager[ResponseFormatT]:
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
-        if model in DEPRECATED_MODELS:
-            warnings.warn(
-                f"The model '{model}' is deprecated and will reach end-of-life on {DEPRECATED_MODELS[model]}.\nPlease migrate to a newer model. Visit https://docs.anthropic.com/en/docs/resources/model-deprecations for more information.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
-
-        if model in MODELS_TO_WARN_WITH_THINKING_ENABLED and thinking and thinking["type"] == "enabled":
-            warnings.warn(
-                f"Using Claude with {model} and 'thinking.type=enabled' is deprecated. Use 'thinking.type=adaptive' instead which results in better model performance in our testing: https://platform.claude.com/docs/en/build-with-claude/adaptive-thinking",
-                UserWarning,
-                stacklevel=3,
-            )
-
+    ) -> BetaAsyncMessageStreamManager:
         extra_headers = {
-            "X-Stainless-Helper-Method": "stream",
             "X-Stainless-Stream-Helper": "beta.messages",
             **strip_not_given({"anthropic-beta": ",".join(str(e) for e in betas) if is_given(betas) else NOT_GIVEN}),
-            **_stainless_helper_header(tools, messages),
             **(extra_headers or {}),
         }
-
-        transformed_output_format: BetaJSONOutputFormatParam | Omit = omit
-
-        if is_dict(output_format):
-            transformed_output_format = cast(BetaJSONOutputFormatParam, output_format)
-        elif is_given(output_format) and output_format is not None:
-            adapted_type: TypeAdapter[ResponseFormatT] = TypeAdapter(output_format)
-
-            try:
-                schema = adapted_type.json_schema()
-                transformed_output_format = BetaJSONOutputFormatParam(
-                    schema=transform_schema(schema), type="json_schema"
-                )
-            except pydantic.errors.PydanticSchemaGenerationError as e:
-                raise TypeError(
-                    (
-                        "Could not generate JSON schema for the given `output_format` type. "
-                        "Use a type that works with `pydantic.TypeAdapter`"
-                    )
-                ) from e
-
-        merged_output_config = _merge_output_configs(output_config, transformed_output_format)
-
         request = self._post(
-            "/v1/messages?beta=true",
+            "/v1/messages",
             body=maybe_transform(
                 {
                     "max_tokens": max_tokens,
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
                     "metadata": metadata,
-                    "output_config": merged_output_config,
-                    "output_format": omit,
-                    "container": container,
-                    "context_management": context_management,
-                    "inference_geo": inference_geo,
-                    "mcp_servers": mcp_servers,
-                    "service_tier": service_tier,
-                    "speed": speed,
                     "stop_sequences": stop_sequences,
                     "system": system,
                     "temperature": temperature,
@@ -3423,33 +2273,24 @@ class AsyncMessages(AsyncAPIResource):
             stream=True,
             stream_cls=AsyncStream[BetaRawMessageStreamEvent],
         )
-        return BetaAsyncMessageStreamManager(
-            request,
-            output_format=NOT_GIVEN if is_dict(output_format) else cast(ResponseFormatT, output_format),
-        )
+        return BetaAsyncMessageStreamManager(request)
 
     async def count_tokens(
         self,
         *,
         messages: Iterable[BetaMessageParam],
         model: ModelParam,
-        cache_control: Optional[BetaCacheControlEphemeralParam] | Omit = omit,
-        context_management: Optional[BetaContextManagementConfigParam] | Omit = omit,
-        mcp_servers: Iterable[BetaRequestMCPServerURLDefinitionParam] | Omit = omit,
-        output_config: BetaOutputConfigParam | Omit = omit,
-        output_format: Optional[BetaJSONOutputFormatParam] | Omit = omit,
-        speed: Optional[Literal["standard", "fast"]] | Omit = omit,
-        system: Union[str, Iterable[BetaTextBlockParam]] | Omit = omit,
-        thinking: BetaThinkingConfigParam | Omit = omit,
-        tool_choice: BetaToolChoiceParam | Omit = omit,
-        tools: Iterable[message_count_tokens_params.Tool] | Omit = omit,
-        betas: List[AnthropicBetaParam] | Omit = omit,
+        system: Union[str, Iterable[BetaTextBlockParam]] | NotGiven = NOT_GIVEN,
+        thinking: BetaThinkingConfigParam | NotGiven = NOT_GIVEN,
+        tool_choice: BetaToolChoiceParam | NotGiven = NOT_GIVEN,
+        tools: Iterable[message_count_tokens_params.Tool] | NotGiven = NOT_GIVEN,
+        betas: List[AnthropicBetaParam] | NotGiven = NOT_GIVEN,
         # Use the following arguments if you need to pass additional parameters to the API that aren't available via kwargs.
         # The extra values given here take precedence over values defined on the client or passed to this method.
         extra_headers: Headers | None = None,
         extra_query: Query | None = None,
         extra_body: Body | None = None,
-        timeout: float | httpx.Timeout | None | NotGiven = not_given,
+        timeout: float | httpx.Timeout | None | NotGiven = NOT_GIVEN,
     ) -> BetaMessageTokensCount:
         """
         Count the number of tokens in a Message.
@@ -3458,7 +2299,7 @@ class AsyncMessages(AsyncAPIResource):
         including tools, images, and documents, without creating it.
 
         Learn more about token counting in our
-        [user guide](https://docs.claude.com/en/docs/build-with-claude/token-counting)
+        [user guide](/en/docs/build-with-claude/token-counting)
 
         Args:
           messages: Input messages.
@@ -3518,45 +2359,45 @@ class AsyncMessages(AsyncAPIResource):
               { "role": "user", "content": [{ "type": "text", "text": "Hello, Claude" }] }
               ```
 
-              See [input examples](https://docs.claude.com/en/api/messages-examples).
+              Starting with Claude 3 models, you can also send image content blocks:
+
+              ```json
+              {
+                "role": "user",
+                "content": [
+                  {
+                    "type": "image",
+                    "source": {
+                      "type": "base64",
+                      "media_type": "image/jpeg",
+                      "data": "/9j/4AAQSkZJRg..."
+                    }
+                  },
+                  { "type": "text", "text": "What is in this image?" }
+                ]
+              }
+              ```
+
+              We currently support the `base64` source type for images, and the `image/jpeg`,
+              `image/png`, `image/gif`, and `image/webp` media types.
+
+              See [examples](https://docs.anthropic.com/en/api/messages-examples#vision) for
+              more input examples.
 
               Note that if you want to include a
-              [system prompt](https://docs.claude.com/en/docs/system-prompts), you can use the
-              top-level `system` parameter — there is no `"system"` role for input messages in
-              the Messages API.
-
-              There is a limit of 100,000 messages in a single request.
+              [system prompt](https://docs.anthropic.com/en/docs/system-prompts), you can use
+              the top-level `system` parameter — there is no `"system"` role for input
+              messages in the Messages API.
 
           model: The model that will complete your prompt.\n\nSee
               [models](https://docs.anthropic.com/en/docs/models-overview) for additional
               details and options.
 
-          cache_control: Top-level cache control automatically applies a cache_control marker to the last
-              cacheable block in the request.
-
-          context_management: Context management configuration.
-
-              This allows you to control how Claude manages context across multiple requests,
-              such as whether to clear function results or not.
-
-          mcp_servers: MCP servers to be utilized in this request
-
-          output_config: Configuration options for the model's output, such as the output format.
-
-          output_format: Deprecated: Use `output_config.format` instead. See
-              [structured outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs)
-
-              A schema to specify Claude's output format in responses. This parameter will be
-              removed in a future release.
-
-          speed: The inference speed mode for this request. `"fast"` enables high
-              output-tokens-per-second inference.
-
           system: System prompt.
 
               A system prompt is a way of providing context and instructions to Claude, such
               as specifying a particular goal or role. See our
-              [guide to system prompts](https://docs.claude.com/en/docs/system-prompts).
+              [guide to system prompts](https://docs.anthropic.com/en/docs/system-prompts).
 
           thinking: Configuration for enabling Claude's extended thinking.
 
@@ -3565,7 +2406,7 @@ class AsyncMessages(AsyncAPIResource):
               tokens and counts towards your `max_tokens` limit.
 
               See
-              [extended thinking](https://docs.claude.com/en/docs/build-with-claude/extended-thinking)
+              [extended thinking](https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking)
               for details.
 
           tool_choice: How the model should use the provided tools. The model can use a specific tool,
@@ -3577,12 +2418,6 @@ class AsyncMessages(AsyncAPIResource):
               content blocks that represent the model's use of those tools. You can then run
               those tools using the tool input generated by the model and then optionally
               return results back to the model using `tool_result` content blocks.
-
-              There are two types of tools: **client tools** and **server tools**. The
-              behavior described below applies to client tools. For
-              [server tools](https://docs.claude.com/en/docs/agents-and-tools/tool-use/overview#server-tools),
-              see their individual documentation as each has its own behavior (e.g., the
-              [web search tool](https://docs.claude.com/en/docs/agents-and-tools/tool-use/web-search-tool)).
 
               Each tool definition includes:
 
@@ -3645,7 +2480,7 @@ class AsyncMessages(AsyncAPIResource):
               functions, or more generally whenever you want the model to produce a particular
               JSON structure of output.
 
-              See our [guide](https://docs.claude.com/en/docs/tool-use) for more details.
+              See our [guide](https://docs.anthropic.com/en/docs/tool-use) for more details.
 
           betas: Optional header to specify the beta version(s) you want to use.
 
@@ -3657,17 +2492,12 @@ class AsyncMessages(AsyncAPIResource):
 
           timeout: Override the client-level default timeout for this request, in seconds
         """
-        _validate_output_config_conflict(output_config, output_format)
-        _warn_output_format_deprecated(output_format)
-
-        merged_output_config = _merge_output_configs(output_config, output_format)
-
         extra_headers = {
             **strip_not_given(
                 {
                     "anthropic-beta": ",".join(chain((str(e) for e in betas), ["token-counting-2024-11-01"]))
                     if is_given(betas)
-                    else not_given
+                    else NOT_GIVEN
                 }
             ),
             **(extra_headers or {}),
@@ -3679,13 +2509,6 @@ class AsyncMessages(AsyncAPIResource):
                 {
                     "messages": messages,
                     "model": model,
-                    "cache_control": cache_control,
-                    "context_management": context_management,
-                    "mcp_servers": mcp_servers,
-                    "mcp_servers": mcp_servers,
-                    "output_config": merged_output_config,
-                    "output_format": omit,
-                    "speed": speed,
                     "system": system,
                     "thinking": thinking,
                     "tool_choice": tool_choice,
@@ -3707,9 +2530,6 @@ class MessagesWithRawResponse:
         self.create = _legacy_response.to_raw_response_wrapper(
             messages.create,
         )
-        self.parse = _legacy_response.to_raw_response_wrapper(
-            messages.parse,
-        )
         self.count_tokens = _legacy_response.to_raw_response_wrapper(
             messages.count_tokens,
         )
@@ -3725,9 +2545,6 @@ class AsyncMessagesWithRawResponse:
 
         self.create = _legacy_response.async_to_raw_response_wrapper(
             messages.create,
-        )
-        self.parse = _legacy_response.async_to_raw_response_wrapper(
-            messages.parse,
         )
         self.count_tokens = _legacy_response.async_to_raw_response_wrapper(
             messages.count_tokens,
@@ -3768,44 +2585,3 @@ class AsyncMessagesWithStreamingResponse:
     @cached_property
     def batches(self) -> AsyncBatchesWithStreamingResponse:
         return AsyncBatchesWithStreamingResponse(self._messages.batches)
-
-
-def validate_output_format(output_format: object) -> None:
-    if inspect.isclass(output_format) and issubclass(output_format, pydantic.BaseModel):
-        raise TypeError(
-            "You tried to pass a `BaseModel` class to `beta.messages.create()`; You must use `beta.messages.parse()` instead"
-        )
-
-
-def _validate_output_config_conflict(
-    output_config: BetaOutputConfigParam | Omit,
-    output_format: object,
-) -> None:
-    if is_given(output_format) and output_format is not None and is_given(output_config):
-        if "format" in output_config and output_config["format"] is not None:
-            raise AnthropicError(
-                "Both output_format and output_config.format were provided. "
-                "Please use only output_config.format (output_format is deprecated).",
-            )
-
-
-def _merge_output_configs(
-    output_config: BetaOutputConfigParam | Omit,
-    output_format: Optional[BetaJSONOutputFormatParam] | Omit,
-) -> BetaOutputConfigParam | Omit:
-    if is_given(output_format):
-        if is_given(output_config):
-            return {**output_config, "format": output_format}
-        else:
-            return {"format": output_format}
-    return output_config
-
-
-def _warn_output_format_deprecated(output_format: object) -> None:
-    """Emit deprecation warning if output_format is provided."""
-    if is_given(output_format) and output_format is not None:
-        warnings.warn(
-            "The 'output_format' parameter is deprecated. Please use 'output_config.format' instead.",
-            DeprecationWarning,
-            stacklevel=4,
-        )
