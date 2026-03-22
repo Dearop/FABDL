@@ -3,8 +3,10 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { generateStrategies } from '@/services/api'
 import { buildAndSubmitStrategy } from '@/services/xrplTransactions'
+import PnLChart from '@/components/PnLChart'
 import type { Strategy } from '@/lib/types'
 import { PoolRegistryProvider, usePoolRegistry } from '@/contexts/PoolRegistryContext'
+import { VaultRegistryProvider, useVaultRegistry } from '@/contexts/VaultRegistryContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardHeader, CardContent, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -57,7 +59,9 @@ export default function TradingPage() {
   const wallet = useWallet()
   return (
     <PoolRegistryProvider walletAddress={wallet.address}>
-      <TradingPageInner wallet={wallet} />
+      <VaultRegistryProvider walletAddress={wallet.address}>
+        <TradingPageInner wallet={wallet} />
+      </VaultRegistryProvider>
     </PoolRegistryProvider>
   )
 }
@@ -67,6 +71,7 @@ export default function TradingPage() {
 function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) {
   const walletId = wallet.address ?? ''
   const { pools, isLoading: poolsLoading, error: poolsError } = usePoolRegistry()
+  const { vaults, isLoading: vaultsLoading, error: vaultsError } = useVaultRegistry()
 
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
@@ -78,10 +83,16 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
   const inputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
 
+  const registryLoading = poolsLoading || vaultsLoading
+  const registryErrors = [
+    poolsError ? `Pool registry: ${poolsError}` : null,
+    vaultsError ? `Vault registry: ${vaultsError}` : null,
+  ].filter((value): value is string => Boolean(value))
   const canSign =
     wallet.address !== null &&
     wallet.providerType !== 'crossmark' &&
-    !poolsLoading
+    !registryLoading &&
+    registryErrors.length === 0
 
   // Derived: latest strategies from most recent assistant message
   const latestStrategies = useMemo(() => {
@@ -172,10 +183,11 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
         wallet.address,
         wallet.signAndSubmit,
         pools,
+        vaults,
       )
       toast({
         title: 'Strategy Executed',
-        description: `Transaction hash: ${result.txHash.slice(0, 12)}...`,
+        description: `Transaction hash: ${result.txHash.slice(0, 8)}...`,
       })
     } catch (err) {
       toast({
@@ -186,7 +198,7 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
     } finally {
       setIsExecuting(null)
     }
-  }, [isExecuting, wallet, latestStrategies, toast, pools])
+  }, [isExecuting, wallet, latestStrategies, toast, pools, vaults])
 
   // Keyboard handler
   const handleKeyDown = useCallback(
@@ -268,15 +280,15 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
       )}
 
       {/* ---- Pool Registry Status ---- */}
-      {poolsLoading && (
+      {registryLoading && (
         <div className="bg-muted/50 border-b border-border px-4 py-1.5 text-xs text-muted-foreground text-center flex items-center justify-center gap-2">
           <Spinner className="h-3 w-3" />
-          Loading pool registry…
+          Loading pool and vault registries...
         </div>
       )}
-      {poolsError && (
+      {registryErrors.length > 0 && (
         <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-1.5 text-xs text-destructive text-center">
-          Pool registry error: {poolsError}
+          {registryErrors.join(' | ')}
         </div>
       )}
 
@@ -375,6 +387,12 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
                   />
                 ))}
               </div>
+              {latestStrategies.length > 0 && (
+                <div className="mt-4">
+                  <h3 className="text-sm font-medium text-muted-foreground mb-2">7-Day Projected Returns</h3>
+                  <PnLChart strategies={latestStrategies} />
+                </div>
+              )}
             </div>
           )}
         </div>

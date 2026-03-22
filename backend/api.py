@@ -3,16 +3,22 @@ Backend API that bridges the frontend HTTP requests to the Intent Router gRPC se
 Handles wallet connection, query classification, strategy generation, and execution.
 """
 
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import grpc
 import sys
 import os
 import asyncio
 import json
 import re
 from typing import Optional
+
+# Vendor directory (packages installed here when system pip Scripts dir is locked)
+_VENDOR = os.path.join(os.path.dirname(__file__), 'vendor')
+if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
+    sys.path.insert(0, _VENDOR)
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+import grpc
 import anthropic as _anthropic
 import httpx
 
@@ -519,6 +525,198 @@ async def generate_strategies(request: QueryRequest):
     except Exception as e:
         print(f"[Backend] Unhandled error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ==================== MCP Agentic Endpoint ====================
+
+# Tool schemas match mcp-server/server.py exactly so the same backend functions
+# serve both the stdio MCP server and the in-process agentic loop.
+_MCP_TOOLS = [
+    {
+        "name": "route_intent",
+        "description": "Classify a natural language trading query into a structured intent (action, scope, confidence, parameters)",
+        "input_schema": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Natural language trading query"}},
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "analyze_portfolio",
+        "description": (
+            "Fetch XRPL AMM positions and compute quant risk metrics "
+            "(IL, CVaR, Sharpe, delta, gamma, net carry, fee APR, lending vaults, open loans) for a wallet. "
+            "Call this before generating strategies."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "wallet_id": {"type": "string", "description": "XRPL wallet address (r...)"},
+                "pool": {"type": ["string", "null"], "description": "e.g. 'XRP/USD'. null = whole portfolio."},
+            },
+            "required": ["wallet_id"],
+        },
+    },
+    {
+        "name": "get_lending_context",
+        "description": (
+            "Fetch XLS-66d vault APYs, kink utilization, available liquidity, and the wallet's open loans. "
+            "Call this when the user asks about borrowing, lending, or delta-neutral strategies."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "asset": {"type": "string", "description": "Asset ticker, e.g. 'XRP'"},
+                "wallet_id": {"type": "string", "description": "XRPL wallet address"},
+            },
+            "required": ["asset", "wallet_id"],
+        },
+    },
+]
+
+_MCP_SYSTEM_PROMPT = (
+    CLAUDE_SYSTEM_PROMPT
+    + """
+
+ORCHESTRATION INSTRUCTIONS:
+You are operating in tool-use mode. Before generating strategies you MUST:
+1. Call analyze_portfolio with the wallet_id to get risk metrics.
+2. If the portfolio has open loans OR the user mentions lending/borrowing, also call get_lending_context for each relevant asset.
+3. Once you have the data, output the strategies JSON (same schema as above). Do not call tools after you have enough data.
+Calling route_intent is optional — use it only if the user query is ambiguous.
+"""
+)
+
+
+async def _execute_mcp_tool(tool_name: str, tool_input: dict, wallet_id: str) -> dict:
+    """Execute a single MCP tool call in-process (mirrors mcp-server implementations)."""
+    if tool_name == "route_intent":
+        try:
+            intent = await classify_intent_with_grpc(tool_input["query"])
+            return intent
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    elif tool_name == "analyze_portfolio":
+        try:
+            payload = {
+                "action": "analyze_risk",
+                "scope": "portfolio",
+                "parameters": {"wallet_address": tool_input["wallet_id"]},
+                "confidence": 1.0,
+            }
+            if tool_input.get("pool"):
+                payload["parameters"]["pool"] = tool_input["pool"]
+            prompt_text = await _call_rust_backend(payload)
+            return {"risk_summary": prompt_text}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    elif tool_name == "get_lending_context":
+        try:
+            payload = {
+                "action": "check_position",
+                "scope": "specific_asset",
+                "parameters": {
+                    "wallet_address": tool_input["wallet_id"],
+                    "focus": tool_input["asset"],
+                },
+                "confidence": 1.0,
+            }
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(f"{RUST_BACKEND_URL}/analyze", json=payload)
+            if resp.status_code != 200:
+                return {"error": f"Rust backend {resp.status_code}: {resp.text}"}
+            try:
+                data = resp.json()
+                return {
+                    "lending_vaults": data.get("lending_vaults", []),
+                    "open_loans": data.get("open_loans", []),
+                }
+            except Exception:
+                return {"raw": resp.text}
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    return {"error": f"Unknown tool: {tool_name}"}
+
+
+@app.post("/strategies/generate-mcp")
+async def generate_strategies_mcp(request: QueryRequest):
+    """
+    MCP-orchestrated strategy generation.
+    Claude acts as orchestrator: it decides which tools to call, gathers
+    portfolio and lending data, then generates strategies — rather than the
+    hardcoded pipeline in /strategies/generate.
+    """
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not set")
+
+    client = _anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                f"User query: {request.user_query}\n"
+                f"Wallet address: {request.wallet_id}\n\n"
+                "Gather the necessary data using the available tools, then return the strategies JSON."
+            ),
+        }
+    ]
+
+    print(f"\n[MCP] /strategies/generate-mcp  wallet={request.wallet_id}  query='{request.user_query}'")
+
+    def _sync_create(msgs):
+        return client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4096,
+            system=_MCP_SYSTEM_PROMPT,
+            tools=_MCP_TOOLS,
+            messages=msgs,
+        )
+
+    MAX_TURNS = 8  # guard against infinite tool loops
+    for turn in range(MAX_TURNS):
+        response = await asyncio.to_thread(_sync_create, messages)
+        print(f"  [MCP] turn {turn+1}: stop_reason={response.stop_reason}  blocks={len(response.content)}")
+
+        if response.stop_reason == "end_turn":
+            # Extract final text and parse strategies
+            final_text = next(
+                (b.text for b in response.content if hasattr(b, "text")), ""
+            ).strip()
+            fence = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", final_text, re.DOTALL)
+            if fence:
+                final_text = fence.group(1)
+            try:
+                claude_response = json.loads(final_text)
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=500, detail="Claude MCP response was not valid JSON")
+            strategies = _validate_and_filter_strategies(claude_response)
+            print(f"  [MCP] {len(strategies)} strategies validated\n")
+            return {"strategies": strategies, "wallet_id": request.wallet_id, "mode": "mcp"}
+
+        if response.stop_reason == "tool_use":
+            # Add assistant turn, then execute all tool calls and add results
+            messages.append({"role": "assistant", "content": response.content})
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    print(f"  [MCP] tool call: {block.name}  input={block.input}")
+                    result = await _execute_mcp_tool(block.name, block.input, request.wallet_id)
+                    print(f"  [MCP] tool result keys: {list(result.keys())}")
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": json.dumps(result),
+                    })
+            messages.append({"role": "user", "content": tool_results})
+            continue
+
+        # Unexpected stop reason
+        raise HTTPException(status_code=500, detail=f"Unexpected stop_reason: {response.stop_reason}")
+
+    raise HTTPException(status_code=500, detail="MCP agentic loop exceeded max turns without completing")
+
 
 # ==================== Strategy Execution ====================
 
