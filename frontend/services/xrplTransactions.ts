@@ -14,10 +14,6 @@ import {
   type PoolAsset,
 } from '@/services/poolRegistry'
 import {
-  isDiscoveredPool,
-  resolveDiscoveredPool,
-} from '@/services/ammDiscovery'
-import {
   isVaultSupportedForExecution,
   resolveVaultByAsset,
 } from '@/services/vaultRegistry'
@@ -56,12 +52,8 @@ function unsupported(reason: string): StrategyExecutionSupport {
   return { executable: false, reason }
 }
 
-/** Resolve a pool: prefer live discovered pools, fall back to static registry. */
+/** Resolve a pool from the static registry. */
 function resolvePool(pool: string): { asset1: PoolAsset; asset2: PoolAsset } {
-  if (isDiscoveredPool(pool)) {
-    const discovered = resolveDiscoveredPool(pool)
-    return { asset1: discovered.asset1, asset2: discovered.asset2 }
-  }
   const configured = resolveConfiguredPool(pool)
   return { asset1: configured.asset1, asset2: configured.asset2 }
 }
@@ -94,15 +86,14 @@ function getActionExecutionSupport(action: TradeAction, network: XrplNetwork = '
         return unsupported(`${action.action} action is missing a pool label.`)
       }
       try {
-        normalizePoolLabel(action.pool) // validate format
+        const normalized = normalizePoolLabel(action.pool)
+        if (!isPoolConfigured(action.pool)) {
+          return unsupported(
+            `AMM pool "${normalized}" is not configured for live execution.`,
+          )
+        }
       } catch (error) {
         return unsupported(error instanceof Error ? error.message : 'Invalid AMM pool label.')
-      }
-      // Check discovered pools first, fall back to static registry
-      if (!isDiscoveredPool(action.pool) && !isPoolConfigured(action.pool)) {
-        return unsupported(
-          `AMM pool "${normalizePoolLabel(action.pool)}" was not found on-chain. It may not exist on the current network.`,
-        )
       }
       return { executable: true }
 

@@ -20,7 +20,6 @@ import { Toaster } from '@/components/ui/toaster'
 import { useToast } from '@/hooks/use-toast'
 import { useWallet } from '@/hooks/useWallet'
 import { KeyEntryModal } from '@/components/KeyEntryModal'
-import { fetchLivePools, getAvailablePoolSummary } from '@/services/ammDiscovery'
 import { cn } from '@/lib/utils'
 import { Send, Wallet, ArrowRight, Check, X, Bot, KeyRound } from 'lucide-react'
 
@@ -72,10 +71,6 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
   const [successStrategy, setSuccessStrategy] = useState<Strategy | null>(null)
   const [successResult, setSuccessResult] = useState<StrategyExecutionResult | null>(null)
 
-  // Discovered pool state
-  const [poolsLoaded, setPoolsLoaded] = useState(false)
-  const [poolCount, setPoolCount] = useState(0)
-
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
@@ -84,48 +79,14 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
     wallet.address !== null &&
     wallet.providerType !== 'crossmark'
 
-  // Discover AMM pools when wallet connects
-  useEffect(() => {
-    if (!wallet.address) {
-      setPoolsLoaded(false)
-      setPoolCount(0)
-      return
-    }
-    let cancelled = false
-    fetchLivePools(true).then(pools => {
-      if (cancelled) return
-      setPoolsLoaded(true)
-      setPoolCount(pools.size)
-      if (pools.size > 0) {
-        toast({
-          title: 'Pools Discovered',
-          description: `Found ${pools.size} AMM pool${pools.size === 1 ? '' : 's'} on-chain: ${[...pools.keys()].join(', ')}`,
-        })
-      } else {
-        toast({
-          title: 'No AMM pools found',
-          description: 'No AMM pools were found on the current network. Strategies may be limited.',
-          variant: 'destructive',
-        })
-      }
-    }).catch(err => {
-      if (cancelled) return
-      console.error('[trading/page] pool discovery failed', err)
-      setPoolsLoaded(true)
-    })
-    return () => { cancelled = true }
-  }, [wallet.address, toast])
-
   useEffect(() => {
     console.debug('[trading/page] execute state', {
       walletAddress: wallet.address,
       providerType: wallet.providerType,
       network: wallet.network,
       canSign,
-      poolsLoaded,
-      poolCount,
     })
-  }, [wallet.address, wallet.providerType, wallet.network, canSign, poolsLoaded, poolCount])
+  }, [wallet.address, wallet.providerType, wallet.network, canSign])
 
   const latestStrategies = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -170,7 +131,6 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
         query,
         walletId,
         wallet.network ?? 'devnet',
-        getAvailablePoolSummary(),
       )
       const count = response.strategies?.length ?? 0
       console.debug('[trading/page] strategies loaded', {
@@ -346,9 +306,6 @@ function TradingPageInner({ wallet }: { wallet: ReturnType<typeof useWallet> }) 
       {wallet.address && wallet.providerType && wallet.providerType !== 'crossmark' && (
         <div className="bg-amber-500/10 border-b border-amber-500/30 px-4 py-2 text-xs text-amber-400 text-center">
           Connected to XRPL Devnet — transactions use devnet funds only.
-          {poolsLoaded && poolCount > 0 && ` ${poolCount} AMM pool${poolCount === 1 ? '' : 's'} discovered.`}
-          {poolsLoaded && poolCount === 0 && ' No AMM pools found on-chain.'}
-          {!poolsLoaded && ' Discovering pools...'}
         </div>
       )}
 
