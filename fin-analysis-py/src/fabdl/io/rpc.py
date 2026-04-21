@@ -1,13 +1,28 @@
-"""Generic Ethereum JSON-RPC client.
+"""Generic Ethereum JSON-RPC client with multi-endpoint rate-limit cycling.
 
-Vendor-neutral by design: speaks only standard ``eth_*`` methods so any endpoint
-(paid, free, self-hosted, local Anvil fork) works. No ``alchemy_*``, ``trace_*``,
-or provider-proprietary extensions — use capability detection instead.
+Vendor-neutral by design: speaks only standard ``eth_*`` methods so any
+endpoint (paid, free, self-hosted, local Anvil fork) works.  No
+``alchemy_*``, ``trace_*``, or provider-proprietary extensions.
 
-The response cache is keyed on ``(chain_id, method, block, target, calldata)``
-and stores only immutable results (``eth_call`` at a specific block, finalized
-``eth_getBlockByNumber``). It is a plain SQLite file so concurrent workers
-don't corrupt it.
+Multi-endpoint failover
+-----------------------
+``RpcConfig`` accepts a primary ``url`` plus optional ``fallback_urls``.  When
+any endpoint returns HTTP 429 or a JSON-RPC error whose message contains
+"rate limit", the client:
+
+1. Marks that endpoint as cooling-down for ``rate_limit_cooldown`` seconds.
+2. Immediately retries the same call on the next available endpoint.
+3. If *all* endpoints are cooling-down, sleeps until the soonest one recovers
+   then continues — no call is ever dropped.
+
+Per-endpoint rate limiting (``rate_limit_rps``) throttles each URL
+independently, so the effective throughput scales with pool size.
+
+Cache
+-----
+Responses are keyed on ``(chain_id, method, block, target, calldata)`` and
+stored in SQLite.  Only immutable results are cached (``eth_call`` at a
+specific historic block, finalised ``eth_getBlockByNumber``).
 """
 
 from __future__ import annotations
@@ -29,6 +44,7 @@ from eth_abi import encode as abi_encode
 from tenacity import (
     retry,
     retry_if_exception_type,
+    retry_if_not_exception_type,
     stop_after_attempt,
     wait_exponential,
 )
@@ -38,34 +54,47 @@ from fabdl.core.constants import MULTICALL3_ADDRESS
 log = logging.getLogger(__name__)
 
 
+# ------------------------------------------------------------------ exceptions
+
+
 class RpcError(Exception):
     """Non-retryable JSON-RPC error from the endpoint."""
 
 
 class RpcTransientError(Exception):
-    """Retryable transport or rate-limit error."""
+    """Retryable transport or server error (5xx, timeout, overloaded)."""
+
+
+class RateLimitError(RpcTransientError):
+    """HTTP 429 or rate-limit JSON error — triggers URL cycling."""
 
 
 class TooManyResultsError(RpcError):
-    """``eth_getLogs`` exceeded the provider's result cap; caller should halve the range."""
+    """eth_getLogs exceeded the provider's result cap; caller should halve the range."""
+
+
+# ------------------------------------------------------------------ data classes
 
 
 @dataclass
 class Call:
-    target: str  # 0x-prefixed checksum or lowercase address
-    data: bytes  # abi-encoded calldata
+    target: str   # 0x-prefixed address
+    data: bytes   # ABI-encoded calldata
 
 
 @dataclass
 class RpcConfig:
     url: str
+    fallback_urls: list[str] = field(default_factory=list)
     archive_url: str | None = None
     max_logs_per_request: int = 10_000
     initial_log_chunk_blocks: int = 2_000
     rate_limit_rps: float | None = None
-    retry_attempts: int = 5
+    rate_limit_cooldown: float = 30.0      # base cooldown; doubles per consecutive failure
+    rate_limit_cooldown_max: float = 600.0 # cap on exponential backoff
+    retry_attempts: int = 3
     retry_min_wait: float = 1.0
-    retry_max_wait: float = 16.0
+    retry_max_wait: float = 4.0
     request_headers: dict[str, str] = field(default_factory=dict)
     request_timeout_seconds: float = 30.0
     cache_path: Path | None = None  # defaults to data/checkpoints/rpc_cache.sqlite
@@ -75,15 +104,29 @@ class RpcConfig:
         url = os.environ.get("RPC_URL")
         if not url:
             raise RuntimeError("RPC_URL is not set — see .env.example")
+
+        fallback_str = os.environ.get("RPC_FALLBACK_URLS", "")
+        fallbacks = [u.strip() for u in fallback_str.split(",") if u.strip()]
+
         return cls(
             url=url,
+            fallback_urls=fallbacks,
             archive_url=os.environ.get("ARCHIVE_RPC_URL") or None,
             max_logs_per_request=int(os.environ.get("RPC_MAX_LOGS_PER_REQUEST") or 10_000),
-            initial_log_chunk_blocks=int(os.environ.get("RPC_INITIAL_LOG_CHUNK_BLOCKS") or 2_000),
+            initial_log_chunk_blocks=int(
+                os.environ.get("RPC_INITIAL_LOG_CHUNK_BLOCKS") or 2_000
+            ),
             rate_limit_rps=float(os.environ["RPC_RATE_LIMIT_RPS"])
             if os.environ.get("RPC_RATE_LIMIT_RPS")
             else None,
+            rate_limit_cooldown=float(os.environ.get("RPC_RATE_LIMIT_COOLDOWN") or 30.0),
+            rate_limit_cooldown_max=float(
+                os.environ.get("RPC_RATE_LIMIT_COOLDOWN_MAX") or 600.0
+            ),
         )
+
+
+# ------------------------------------------------------------------ internals
 
 
 class _RpcCache:
@@ -95,7 +138,8 @@ class _RpcCache:
         self._lock = threading.Lock()
         with self._connect() as conn:
             conn.execute(
-                "CREATE TABLE IF NOT EXISTS cache (key TEXT PRIMARY KEY, value BLOB NOT NULL)"
+                "CREATE TABLE IF NOT EXISTS cache "
+                "(key TEXT PRIMARY KEY, value BLOB NOT NULL)"
             )
 
     def _connect(self) -> sqlite3.Connection:
@@ -105,7 +149,9 @@ class _RpcCache:
 
     def get(self, key: str) -> bytes | None:
         with self._lock, self._connect() as conn:
-            row = conn.execute("SELECT value FROM cache WHERE key = ?", (key,)).fetchone()
+            row = conn.execute(
+                "SELECT value FROM cache WHERE key = ?", (key,)
+            ).fetchone()
         return row[0] if row else None
 
     def put(self, key: str, value: bytes) -> None:
@@ -132,6 +178,79 @@ class _RateLimiter:
             self._next_allowed = max(now, self._next_allowed) + self._min_interval
 
 
+class _UrlRotator:
+    """Tracks endpoint health and cycles past rate-limited URLs.
+
+    Thread-safe.  Each URL is either *available* or *cooling-down*.  The
+    cooldown doubles on each consecutive failure (exponential back-off) up to
+    ``max_cooldown``, so persistently broken endpoints are quickly sidelined.
+    A successful call resets that endpoint's back-off counter.
+    """
+
+    def __init__(self, urls: list[str], base_cooldown: float = 30.0, max_cooldown: float = 600.0):
+        if not urls:
+            raise ValueError("at least one URL required")
+        self._urls = list(urls)
+        self._base_cooldown = base_cooldown
+        self._max_cooldown = max_cooldown
+        self._blocked_until: dict[str, float] = {}
+        self._consecutive_failures: dict[str, int] = {}
+        self._lock = threading.Lock()
+
+    def current(self) -> str:
+        """Return the first available URL (not cooling-down)."""
+        with self._lock:
+            return self._pick_available()
+
+    def _pick_available(self) -> str:
+        now = time.monotonic()
+        for url in self._urls:
+            if self._blocked_until.get(url, 0.0) <= now:
+                return url
+        # All cooling-down — return soonest to recover.
+        return min(self._urls, key=lambda u: self._blocked_until.get(u, 0.0))
+
+    def mark_rate_limited(self, url: str) -> str:
+        """Block *url* with exponential back-off; return the next available URL."""
+        with self._lock:
+            failures = self._consecutive_failures.get(url, 0) + 1
+            self._consecutive_failures[url] = failures
+            cooldown = min(self._base_cooldown * (2 ** (failures - 1)), self._max_cooldown)
+            self._blocked_until[url] = time.monotonic() + cooldown
+            log.debug(
+                "%s back-off #%d → %.0fs cooldown", _url_label(url), failures, cooldown
+            )
+            return self._pick_available()
+
+    def mark_success(self, url: str) -> None:
+        """Reset back-off counter for a URL that just returned a good response."""
+        with self._lock:
+            self._consecutive_failures.pop(url, None)
+            self._blocked_until.pop(url, None)
+
+    def seconds_until_any_available(self) -> float:
+        """Seconds to sleep until at least one URL exits cooldown (0 if already available)."""
+        with self._lock:
+            now = time.monotonic()
+            for url in self._urls:
+                if self._blocked_until.get(url, 0.0) <= now:
+                    return 0.0
+            soonest = min(self._blocked_until.get(u, 0.0) for u in self._urls)
+            return max(0.0, soonest - now)
+
+    def all_urls(self) -> list[str]:
+        return list(self._urls)
+
+
+def _url_label(url: str) -> str:
+    """Short human-readable label for a URL (hostname only)."""
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).netloc
+    except Exception:
+        return url[:40]
+
+
 def _hex_to_int(h: str) -> int:
     return int(h, 16) if isinstance(h, str) else h
 
@@ -148,74 +267,185 @@ def _block_to_rpc(block: int | str) -> str:
     raise ValueError(f"bad block reference: {block!r}")
 
 
+# ------------------------------------------------------------------ client
+
+
 class RpcClient:
-    """Standards-only JSON-RPC client. One instance per endpoint."""
+    """Standards-only JSON-RPC client with transparent multi-endpoint failover."""
 
     def __init__(self, config: RpcConfig, *, data_dir: Path | None = None):
         self._cfg = config
+        all_urls = [config.url] + list(config.fallback_urls)
+        self._rotator = _UrlRotator(
+            all_urls,
+            base_cooldown=config.rate_limit_cooldown,
+            max_cooldown=config.rate_limit_cooldown_max,
+        )
+
+        # One rate-limiter per URL so each endpoint's quota is respected
+        # independently — cycling to a fresh URL gets a fresh token bucket.
+        self._limiters: dict[str, _RateLimiter] = {
+            url: _RateLimiter(config.rate_limit_rps) for url in all_urls
+        }
+
         self._session = requests.Session()
+        self._session.headers["content-type"] = "application/json"
         if config.request_headers:
             self._session.headers.update(config.request_headers)
-        self._session.headers["content-type"] = "application/json"
-        self._archive_session = (
-            self._session  # same underlying session; URL chooses routing
-            if not config.archive_url
-            else requests.Session()
-        )
-        if config.archive_url and config.request_headers:
+
+        # Archive session shares headers but uses a dedicated connection pool.
+        self._archive_session = requests.Session()
+        self._archive_session.headers["content-type"] = "application/json"
+        if config.request_headers:
             self._archive_session.headers.update(config.request_headers)
 
         cache_path = config.cache_path or (
             (data_dir or Path("data")) / "checkpoints" / "rpc_cache.sqlite"
         )
         self._cache = _RpcCache(cache_path)
-        self._limiter = _RateLimiter(config.rate_limit_rps)
-
         self._chain_id: int | None = None
         self._supports_archive: bool | None = None
 
     # ------------------------------------------------------------------ transport
 
-    def _post(self, url: str, payload: dict[str, Any] | list[dict[str, Any]]) -> Any:
-        self._limiter.wait()
+    def _post_one(
+        self,
+        url: str,
+        session: requests.Session,
+        payload: dict[str, Any] | list[dict[str, Any]],
+    ) -> Any:
+        """Single HTTP POST to *url*.
+
+        Retries on generic transient errors (5xx, timeout) with exponential
+        backoff via tenacity.  Does NOT retry on ``RateLimitError`` — that is
+        handled by the caller which cycles to a different endpoint.
+        """
+        limiter = self._limiters.get(url) or _RateLimiter(None)
+        limiter.wait()
 
         @retry(
-            retry=retry_if_exception_type(RpcTransientError),
-            wait=wait_exponential(min=self._cfg.retry_min_wait, max=self._cfg.retry_max_wait),
+            retry=(
+                retry_if_exception_type(RpcTransientError)
+                & retry_if_not_exception_type(RateLimitError)
+            ),
+            wait=wait_exponential(
+                min=self._cfg.retry_min_wait, max=self._cfg.retry_max_wait
+            ),
             stop=stop_after_attempt(self._cfg.retry_attempts),
             reraise=True,
         )
         def _do() -> Any:
             try:
-                resp = self._session.post(
+                resp = session.post(
                     url, json=payload, timeout=self._cfg.request_timeout_seconds
                 )
             except requests.RequestException as exc:
                 raise RpcTransientError(f"transport error: {exc}") from exc
-            if resp.status_code == 429 or 500 <= resp.status_code < 600:
-                raise RpcTransientError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+            if resp.status_code == 429:
+                raise RateLimitError(f"HTTP 429 from {_url_label(url)}: {resp.text[:200]}")
+            if resp.status_code in (401, 403):
+                # Auth/access denial on this endpoint — cycle to next provider.
+                raise RateLimitError(
+                    f"HTTP {resp.status_code} from {_url_label(url)}: {resp.text[:200]}"
+                )
+            if 500 <= resp.status_code < 600:
+                # Transient server error — tenacity will retry on the same URL
+                # (short exponential back-off) before we consider cycling away.
+                raise RpcTransientError(
+                    f"HTTP {resp.status_code} from {_url_label(url)}: {resp.text[:200]}"
+                )
+            if resp.status_code == 400:
+                body = resp.text[:400]
+                # Provider capacity limits (e.g. Alchemy free-tier block-range
+                # restriction) — treat as a cycle signal so the rotator moves
+                # to the next endpoint rather than hard-failing.
+                _cap_hints = ("block range", "free tier", "your plan", "upgrade", "compute unit")
+                if any(h in body.lower() for h in _cap_hints):
+                    raise RateLimitError(f"provider capacity limit on {_url_label(url)}: {body[:200]}")
+                raise RpcError(f"HTTP 400 from {_url_label(url)}: {body}")
             if resp.status_code >= 400:
-                raise RpcError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+                raise RpcError(
+                    f"HTTP {resp.status_code} from {_url_label(url)}: {resp.text[:200]}"
+                )
             return resp.json()
 
         return _do()
 
-    def _rpc(self, method: str, params: list[Any], *, archive: bool = False) -> Any:
-        url = self._cfg.archive_url if archive and self._cfg.archive_url else self._cfg.url
-        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-        data = self._post(url, payload)
-        if "error" in data:
-            err = data["error"]
-            msg = err.get("message", str(err))
-            low = msg.lower()
-            if "too many" in low or "query returned more than" in low or "response size" in low:
-                raise TooManyResultsError(msg)
-            if any(h in low for h in ("rate limit", "timeout", "temporarily", "overloaded")):
-                raise RpcTransientError(msg)
-            raise RpcError(msg)
-        return data["result"]
+    def _parse_rpc_result(self, data: Any, url: str) -> Any:
+        """Parse JSON-RPC envelope; raise typed exceptions for error responses."""
+        if "error" not in data:
+            return data["result"]
+        err = data["error"]
+        msg = err.get("message", str(err))
+        low = msg.lower()
+        if any(h in low for h in ("too many", "query returned more than", "response size",
+                                   "block range", "range too large", "exceeds maximum")):
+            raise TooManyResultsError(msg)
+        if any(h in low for h in ("rate limit", "request limit", "compute units", "daily limit")):
+            raise RateLimitError(f"{_url_label(url)}: {msg}")
+        if any(h in low for h in ("timeout", "temporarily", "overloaded")):
+            raise RpcTransientError(msg)
+        raise RpcError(msg)
 
-    # ------------------------------------------------------------------ methods
+    def _rpc(self, method: str, params: list[Any], *, archive: bool = False) -> Any:
+        """Execute a JSON-RPC call, cycling endpoints on rate-limit errors.
+
+        Archive calls always use ``config.archive_url`` if set (never rotated).
+        Non-archive calls rotate through the URL pool on ``RateLimitError``.
+        If every URL is cooling-down, sleeps until the soonest one recovers.
+        """
+        payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+
+        if archive and self._cfg.archive_url:
+            data = self._post_one(self._cfg.archive_url, self._archive_session, payload)
+            return self._parse_rpc_result(data, self._cfg.archive_url)
+
+        tried_urls: set[str] = set()
+        url = self._rotator.current()
+
+        while True:
+            try:
+                data = self._post_one(url, self._session, payload)
+                result = self._parse_rpc_result(data, url)
+                self._rotator.mark_success(url)
+                return result
+            except RateLimitError as exc:
+                log.warning(
+                    "rate-limited on %s — cycling (back-off #%d)",
+                    _url_label(url),
+                    self._rotator._consecutive_failures.get(url, 0) + 1,  # noqa: SLF001
+                )
+                tried_urls.add(url)
+                next_url = self._rotator.mark_rate_limited(url)
+                url = self._handle_exhausted(tried_urls, next_url, exc)
+            except RpcTransientError as exc:
+                # Tenacity retries on same URL exhausted; cycle to next endpoint.
+                log.warning("transient error on %s after retries — cycling", _url_label(url))
+                tried_urls.add(url)
+                next_url = self._rotator.mark_rate_limited(url)
+                url = self._handle_exhausted(tried_urls, next_url, exc)
+
+    def _handle_exhausted(
+        self, tried_urls: set[str], next_url: str, exc: Exception
+    ) -> str:
+        """Handle the case where all URLs in the current cycle have been tried."""
+        if next_url not in tried_urls:
+            return next_url
+        # All endpoints failed in this cycle.
+        wait_t = self._rotator.seconds_until_any_available()
+        if wait_t <= 0:
+            # Zero cooldown (test mode) or already recovered — raise to avoid busy loop.
+            raise exc
+        log.warning(
+            "all %d RPC endpoint(s) unavailable; sleeping %.1fs",
+            len(self._rotator.all_urls()),
+            wait_t,
+        )
+        time.sleep(wait_t)
+        tried_urls.clear()
+        return self._rotator.current()
+
+    # ------------------------------------------------------------------ public methods
 
     def chain_id(self) -> int:
         if self._chain_id is None:
@@ -268,6 +498,10 @@ class RpcClient:
         from_block: int,
         to_block: int,
     ) -> list[dict]:
+        # Use archive=False so eth_getLogs cycles through all URLs in the
+        # rotation.  Historical logs are available on any full node; routing
+        # them to the fixed archive URL would lock onto Alchemy free-tier
+        # which caps eth_getLogs at 10 blocks per request.
         params = [
             {
                 "address": address,
@@ -276,7 +510,7 @@ class RpcClient:
                 "toBlock": _int_to_hex(to_block),
             }
         ]
-        return self._rpc("eth_getLogs", params, archive=True)
+        return self._rpc("eth_getLogs", params, archive=False)
 
     def multicall(
         self,
@@ -285,7 +519,7 @@ class RpcClient:
         block: int | str = "latest",
         allow_failure: bool = False,
     ) -> list[bytes]:
-        """Aggregate3 via Multicall3. Standard `eth_call`, works on any endpoint."""
+        """Aggregate3 via Multicall3.  Standard ``eth_call``, works on any endpoint."""
         selector = bytes.fromhex("82ad56cb")  # aggregate3((address,bool,bytes)[])
         tuples = [(c.target, allow_failure, c.data) for c in calls]
         encoded_args = abi_encode(["(address,bool,bytes)[]"], [tuples])
@@ -303,10 +537,7 @@ class RpcClient:
 
     @property
     def supports_archive(self) -> bool:
-        """True if the endpoint can serve ``eth_call`` at a block more than 128 behind head.
-
-        Probed lazily on first access — costs one ``eth_call``.
-        """
+        """True if the active endpoint can serve ``eth_call`` at historical blocks."""
         if self._supports_archive is None:
             self._supports_archive = self._probe_archive()
         return self._supports_archive
@@ -318,7 +549,6 @@ class RpcClient:
             return False
         probe_block = max(1, head - 1_000)
         try:
-            # Call chainId() on multicall3 at a historical block — cheapest possible probe.
             self.call(
                 MULTICALL3_ADDRESS,
                 bytes.fromhex("3408e470"),  # getChainId()

@@ -50,7 +50,12 @@ def fetch_logs_chunked(
     Returns the number of logs fetched. Resumes from the checkpoint if present.
     """
     topics_list = list(topics)
-    chunk = initial_chunk or rpc._cfg.initial_log_chunk_blocks  # noqa: SLF001
+    initial = initial_chunk or rpc._cfg.initial_log_chunk_blocks  # noqa: SLF001
+    chunk = initial
+    # Tracks the largest chunk size that actually succeeded; once a provider
+    # signals "block range too large" we never try above this ceiling again,
+    # avoiding one wasted request per batch.
+    ceiling = initial
     resume_from = _read_checkpoint(checkpoint_path) if checkpoint_path else None
     start = max(from_block, (resume_from + 1) if resume_from is not None else from_block)
     total = 0
@@ -63,6 +68,7 @@ def fetch_logs_chunked(
             if chunk <= min_chunk:
                 raise
             chunk = max(min_chunk, chunk // 2)
+            ceiling = chunk  # provider ceiling discovered — never exceed this
             log.info("shrinking log chunk to %d blocks and retrying", chunk)
             continue
         on_batch(logs, cursor, window_end)
@@ -70,7 +76,7 @@ def fetch_logs_chunked(
         if checkpoint_path is not None:
             _write_checkpoint(checkpoint_path, window_end)
         cursor = window_end + 1
-        # Grow chunk back up cautiously (doubled) after a clean success.
-        if chunk < (initial_chunk or rpc._cfg.initial_log_chunk_blocks):  # noqa: SLF001
-            chunk = min(chunk * 2, initial_chunk or rpc._cfg.initial_log_chunk_blocks)  # noqa: SLF001
+        # Grow chunk cautiously after a clean success, but never past the ceiling.
+        if chunk < ceiling:
+            chunk = min(chunk * 2, ceiling)
     return total

@@ -89,10 +89,12 @@ def extract_swaps(
     to_block: int,
     *,
     out_dir: Path,
+    parts_dir: Path | None = None,
+    checkpoint_path: Path | None = None,
 ) -> int:
     """Fetch all Swap events in range and write to partitioned parquet parts."""
-    parts_dir = out_dir / "raw" / "swap_events_parts"
-    checkpoint = out_dir / "checkpoints" / "swap_events.json"
+    parts_dir = parts_dir or out_dir / "raw" / "swap_events_parts"
+    checkpoint = checkpoint_path or out_dir / "checkpoints" / "swap_events.json"
     block_index = BlockIndex(rpc, cache_path=out_dir / "checkpoints" / "block_index.sqlite")
 
     def on_batch(logs: list[dict], lo: int, hi: int) -> None:

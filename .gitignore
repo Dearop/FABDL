@@ -37,6 +37,11 @@ Cargo.lock
 Thumbs.db
 .DS_Store
 
+#Data
+./fin-analysis-py/data/block_index.sqlite
+./fin-analysis-py/data/checkpoints/*
+././fin-analysis-py/data/raw/*
+
 # Logs
 *.log
 npm-debug.log*

@@ -14,6 +14,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 DEC = pa.decimal128(38, 0)
+DEC256 = pa.decimal256(76, 0)   # for raw uint256/uint128 fee-growth accumulators
 
 
 def swap_events_schema() -> pa.Schema:
@@ -51,9 +52,9 @@ def mint_burn_events_schema() -> pa.Schema:
             ("owner", pa.binary(20)),
             ("tick_lower", pa.int32()),
             ("tick_upper", pa.int32()),
-            ("liquidity_delta", DEC),
-            ("amount0_raw", DEC),
-            ("amount1_raw", DEC),
+            ("liquidity_delta", DEC256),
+            ("amount0_raw", DEC256),
+            ("amount1_raw", DEC256),
             ("date", pa.string()),
         ]
     )
@@ -72,8 +73,8 @@ def slot0_schema() -> pa.Schema:
             ("observation_cardinality", pa.int32()),
             ("fee_protocol", pa.int32()),
             ("unlocked", pa.bool_()),
-            ("fee_growth_global_0_x128", DEC),   # uint256 cumulative fee accumulator token0
-            ("fee_growth_global_1_x128", DEC),   # uint256 cumulative fee accumulator token1
+            ("fee_growth_global_0_x128", DEC256),
+            ("fee_growth_global_1_x128", DEC256),
         ]
     )
 
@@ -108,10 +109,10 @@ def liquidity_snapshot_schema() -> pa.Schema:
             ("snapshot_block", pa.int64()),
             ("timestamp", pa.int64()),
             ("tick", pa.int32()),
-            ("liquidity_net", DEC),           # int128 signed
-            ("liquidity_gross", DEC),         # uint128
-            ("fee_growth_outside_0_x128", DEC),
-            ("fee_growth_outside_1_x128", DEC),
+            ("liquidity_net", DEC256),
+            ("liquidity_gross", DEC256),
+            ("fee_growth_outside_0_x128", DEC256),
+            ("fee_growth_outside_1_x128", DEC256),
         ]
     )
 

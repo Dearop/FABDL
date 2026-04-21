@@ -32,20 +32,31 @@ def _parse_date(s: str) -> date:
 
 @extract_app.command("swaps")
 def cmd_swaps(
-    from_date: str = typer.Option(..., "--from"),
-    to_date: str = typer.Option(..., "--to"),
+    from_date: str = typer.Option(None, "--from"),
+    to_date: str = typer.Option(None, "--to"),
     compact_output: bool = typer.Option(True, "--compact/--no-compact"),
+    from_block: int = typer.Option(None, "--from-block", help="Override start block (skips date→block lookup)"),
+    to_block: int = typer.Option(None, "--to-block", help="Override end block (skips date→block lookup)"),
+    parts_subdir: str = typer.Option(None, "--parts-dir", help="Parts dir name under data/raw/ (default: swap_events_parts)"),
+    checkpoint_name: str = typer.Option(None, "--checkpoint", help="Checkpoint filename under data/checkpoints/ (default: swap_events.json)"),
 ) -> None:
     """Fetch Swap events for a date range."""
     from fabdl.extract.swaps import compact_swaps, extract_swaps
     from fabdl.io.block_index import BlockIndex
 
     rpc, data_dir = _setup()
-    bi = BlockIndex(rpc, cache_path=data_dir / "checkpoints" / "block_index.sqlite")
-    fb = bi.block_at_timestamp(int(datetime.combine(_parse_date(from_date), datetime.min.time()).timestamp()))
-    tb = bi.block_at_timestamp(int(datetime.combine(_parse_date(to_date), datetime.max.time()).timestamp()))
-    n = extract_swaps(rpc, fb, tb, out_dir=data_dir)
-    typer.echo(f"fetched {n} swap events over blocks {fb}..{tb}")
+    if from_block is None or to_block is None:
+        if from_date is None or to_date is None:
+            raise typer.BadParameter("--from and --to are required when --from-block/--to-block are not both supplied")
+        bi = BlockIndex(rpc, cache_path=data_dir / "checkpoints" / "block_index.sqlite")
+        if from_block is None:
+            from_block = bi.block_at_timestamp(int(datetime.combine(_parse_date(from_date), datetime.min.time()).timestamp()))
+        if to_block is None:
+            to_block = bi.block_at_timestamp(int(datetime.combine(_parse_date(to_date), datetime.max.time()).timestamp()))
+    parts_dir = (data_dir / "raw" / parts_subdir) if parts_subdir else None
+    ckpt_path = (data_dir / "checkpoints" / checkpoint_name) if checkpoint_name else None
+    n = extract_swaps(rpc, from_block, to_block, out_dir=data_dir, parts_dir=parts_dir, checkpoint_path=ckpt_path)
+    typer.echo(f"fetched {n} swap events over blocks {from_block}..{to_block}")
     if compact_output:
         rows = compact_swaps(data_dir)
         typer.echo(f"compacted to swap_events.parquet ({rows} rows)")

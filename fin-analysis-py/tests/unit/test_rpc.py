@@ -15,6 +15,7 @@ import pytest
 
 from fabdl.io.rpc import (
     Call,
+    RateLimitError,
     RpcClient,
     RpcConfig,
     RpcError,
@@ -59,6 +60,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[RpcClient, 
         url="http://fake",
         cache_path=tmp_path / "cache.sqlite",
         retry_attempts=1,
+        rate_limit_cooldown=0,  # instant raise in tests; no 60s sleep
     )
     c = RpcClient(cfg, data_dir=tmp_path)
     return c, sess
@@ -123,15 +125,42 @@ def test_non_standard_error_raises_rpc_error(client):
         c.get_block_number()
 
 
-def test_rate_limit_classified_as_transient(client):
+def test_rate_limit_raises_rate_limit_error(client):
     c, sess = client
     sess._queue.append(
         FakeResponse(
             {"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "rate limit exceeded"}}
         )
     )
-    with pytest.raises(RpcTransientError):
+    # RateLimitError is a subclass of RpcTransientError; both assertions hold.
+    with pytest.raises(RateLimitError):
         c.get_block_number()
+
+
+def test_rate_limit_cycles_to_fallback(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Client transparently retries on the fallback URL when the primary is rate-limited."""
+    # Both URLs share the same session (RpcClient uses self._session for all primary URLs).
+    sess = FakeSession([
+        # First attempt: primary → rate-limit JSON error (HTTP 200 body)
+        FakeResponse({"jsonrpc": "2.0", "id": 1, "error": {"code": -32005, "message": "rate limit exceeded"}}),
+        # Second attempt: fallback → success
+        FakeResponse({"jsonrpc": "2.0", "id": 1, "result": "0x123"}),
+    ])
+    monkeypatch.setattr("fabdl.io.rpc.requests.Session", lambda: sess)
+
+    cfg = RpcConfig(
+        url="http://primary",
+        fallback_urls=["http://fallback"],
+        cache_path=tmp_path / "cache.sqlite",
+        retry_attempts=1,
+        rate_limit_cooldown=60,
+    )
+    c = RpcClient(cfg, data_dir=tmp_path)
+    result = c.get_block_number()
+    assert result == 0x123
+    urls_used = [call["url"] for call in sess.calls]
+    assert urls_used[0] == "http://primary"
+    assert urls_used[1] == "http://fallback"
 
 
 def test_multicall_uses_standard_eth_call(client):

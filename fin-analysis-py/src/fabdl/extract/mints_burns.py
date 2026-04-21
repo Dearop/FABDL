@@ -25,11 +25,9 @@ log = logging.getLogger(__name__)
 
 
 def _int24_from_topic(topic: str) -> int:
-    """Decode int24 packed left-aligned in a 32-byte topic."""
-    raw = int(topic, 16)
-    raw &= (1 << 256) - 1
-    # topic is right-aligned uint256; sign-extend the lower 24 bits
-    if raw & (1 << 23):
+    """Decode int24 right-aligned in a 32-byte ABI-encoded topic."""
+    raw = int(topic, 16) & ((1 << 24) - 1)  # keep only the lower 24 bits
+    if raw & (1 << 23):  # sign-extend if negative
         raw -= 1 << 24
     return raw
 
